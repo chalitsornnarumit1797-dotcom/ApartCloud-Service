@@ -46,11 +46,23 @@ const QC_LIST = [
   { group: "3. หมวดพื้นและผนัง", items: ["กระเบื้อง", "ความลาดเอียง", "ยาแนว", "ผนังเรียบ", "สีสม่ำเสมอ"] },
   { group: "4. หมวดเฟอร์นิเจอร์", items: ["ตู้เสื้อผ้า", "บานพับ/มือจับ", "เตียงนอน", "โต๊ะเก้าอี้", "ผ้าม่าน", "ฟูกที่นอน"] },
   { group: "5. หมวดระบบสุขาภิบาล", items: ["ชักโครก", "ยาแนวสุขภัณฑ์", "ก๊อกน้ำ/ฝักบัว", "ท่อน้ำทิ้ง", "เพดานไม่รั่ว"] },
-  { group: "6. หมวดระเบียง", items: ["ราวกันตก", "ก๊อกซักล้าง"] }
+  { group: "6. หมวดระบบระเบียง", items: ["ราวกันตก", "ก๊อกซักล้าง"] }
 ];
 
 const PROPERTIES = [
-  { id: 'mangmee', name: 'บ้านมั่งมีทวีสุข', floors: [{ level: 6, rooms: Array.from({ length: 18 }, (_, i) => `6${String(i + 1).padStart(2, '0')}`) }, { level: 5, rooms: Array.from({ length: 18 }, (_, i) => `5${String(i + 1).padStart(2, '0')}`) }, { level: 4, rooms: Array.from({ length: 18 }, (_, i) => `4${String(i + 1).padStart(2, '0')}`) }, { level: 3, rooms: Array.from({ length: 18 }, (_, i) => `3${String(i + 1).padStart(2, '0')}`) }, { level: 2, rooms: Array.from({ length: 18 }, (_, i) => `2${String(i + 1).padStart(2, '0')}`) }], prices: "3,500 - 4,500" },
+  { 
+    id: 'mangmee', 
+    name: 'บ้านมั่งมีทวีสุข', 
+    floors: [
+      { level: 7, rooms: Array.from({ length: 18 }, (_, i) => `7${String(i + 1).padStart(2, '0')}`) }, // เพิ่มชั้น 7 แล้ว
+      { level: 6, rooms: Array.from({ length: 18 }, (_, i) => `6${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 5, rooms: Array.from({ length: 18 }, (_, i) => `5${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 4, rooms: Array.from({ length: 18 }, (_, i) => `4${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 3, rooms: Array.from({ length: 18 }, (_, i) => `3${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 2, rooms: Array.from({ length: 18 }, (_, i) => `2${String(i + 1).padStart(2, '0')}`) }
+    ],
+    prices: "3,500 - 4,500"
+  },
   { id: 'mytree', name: 'บ้านมายทรี 48', floors: [{ level: 5, rooms: ['501','502','503','505','506','507','508','509','510','511','512','513','514','515'] }, { level: 4, rooms: ['401','402','403','405','406','407','408','409','410','411','412','413','414','415'] }, { level: 3, rooms: ['301','302','303','305','306','307','308','309','310','311','312','313','314','315'] }, { level: 2, rooms: ['201','202','203','205','206','207','208','209','210','211','212','213','214','215'] }, { level: 1, rooms: Array.from({ length: 11 }, (_, i) => `1${String(i + 1).padStart(2, '0')}`) }], prices: "4,000 - 5,500" },
   { id: 'khunluang', name: 'บ้านคุณหลวง', floors: [{ level: 4, rooms: Array.from({ length: 6 }, (_, i) => `4/${i + 1}`) }, { level: 3, rooms: Array.from({ length: 12 }, (_, i) => `3/${i + 1}`) }, { level: 2, rooms: Array.from({ length: 12 }, (_, i) => `2/${i + 1}`) }, { level: 1, rooms: Array.from({ length: 18 }, (_, i) => `1/${i + 1}`) }], prices: "3,000 - 4,200" },
   { id: 'meesap', name: 'อพาร์ทเม้นท์มีทรัพย์', floors: Array.from({ length: 5 }, (_, i) => ({ level: 5 - i, rooms: Array.from({ length: 6 }, (_, j) => `${5 - i}.${j + 1}`) })), prices: "3,200 - 3,800" },
@@ -93,21 +105,13 @@ export default function App() {
     return s;
   }, [roomStates, activePropertyId, activeProperty]);
 
-  // ฟังก์ชันล้างข้อมูลทั้งหมด (Reset)
   const handleResetSystem = async () => {
-    if (!window.confirm("⚠️ คำเตือน: คุณกำลังจะล้างข้อมูลห้องทั้งหมดและประวัติลูกค้า ข้อมูลนี้จะไม่สามารถกู้คืนได้ ยืนยันหรือไม่?")) return;
-    
-    // 1. ล้าง History
+    if (!window.confirm("⚠️ ยืนยันการล้างข้อมูลระบบ? ประวัติและสถานะทั้งหมดจะหายไป")) return;
     const historySnap = await getDocs(collection(db, 'apartments', appId, 'history'));
     historySnap.forEach(async (d) => await deleteDoc(doc(db, 'apartments', appId, 'history', d.id)));
-
-    // 2. ล้าง Rooms (วนลูปตั้งค่าเป็น 'rented' ทุกห้อง)
     const roomSnap = await getDocs(collection(db, 'apartments', appId, 'rooms'));
-    roomSnap.forEach(async (d) => {
-      await setDoc(doc(db, 'apartments', appId, 'rooms', d.id), { status: 'rented', updatedAt: Date.now() });
-    });
-
-    alert("ล้างข้อมูลระบบเรียบร้อยแล้ว ทุกห้องกลับสู่สถานะ 'มีผู้เช่า' และประวัติว่างเปล่า");
+    roomSnap.forEach(async (d) => { await setDoc(doc(db, 'apartments', appId, 'rooms', d.id), { status: 'rented', updatedAt: Date.now() }); });
+    alert("Reset Complete");
     setViewMode('grid');
   };
 
@@ -142,7 +146,7 @@ export default function App() {
       if (cur === 'pendingCheck') updateData.repairData = repairs;
       if (cur === 'finalQC') { updateData.qcData = qcStatus; updateData.qcNote = formData.get('qcNote'); }
       if (['cleaning', 'maintenance', 'cleaningPost'].includes(cur)) updateData[`${cur}_state`] = procStatus;
-      if (updateData.status === 'ready') { delete updateData.tenantName; delete updateData.tenantPhone; delete updateData.repairData; delete updateData.qcData; delete updateData.qcNote; }
+      if (updateData.status === 'ready') { delete updateData.tenantName; delete updateData.tenantPhone; delete updateData.repairData; delete updateData.qcData; }
     }
     await setDoc(doc(db, 'apartments', appId, 'rooms', docId), updateData);
     setSelectedRoom(null); setRepairs({}); setQcStatus({}); setProcStatus('pending');
@@ -151,7 +155,7 @@ export default function App() {
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-['Prompt']">
-        <form onSubmit={(e) => { e.preventDefault(); pinInput === ACCESS_PIN ? setIsUnlocked(true) : alert('PIN ผิด!'); }} className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl space-y-6 text-center">
+        <form onSubmit={(e) => { e.preventDefault(); pinInput === ACCESS_PIN ? setIsUnlocked(true) : alert('PIN!'); }} className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl text-center space-y-6">
           <Wrench size={48} className="mx-auto text-indigo-600" />
           <h2 className="text-xl font-black italic">SERVICE HUB</h2>
           <input type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-4 bg-slate-100 rounded-2xl text-center text-4xl font-bold border-2 focus:border-indigo-500 outline-none" placeholder="PIN" />
@@ -178,7 +182,7 @@ export default function App() {
           <>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="bg-white p-6 rounded-[2.5rem] border shadow-sm space-y-4">
-                <h2 className="font-black text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><PieChart size={16}/> {activeProperty.name}</h2>
+                <h2 className="font-black text-[10px] flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><PieChart size={14}/> {activeProperty.name}</h2>
                 <div className="grid grid-cols-2 gap-2">
                   {Object.entries(STATUS_FLOW).map(([k, v]) => (
                     <div key={k} className="p-3 bg-slate-50 rounded-2xl border text-center">
@@ -188,10 +192,10 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div className="lg:col-span-2 bg-indigo-600 p-8 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden flex items-center">
-                <div className="relative z-10 space-y-2">
+              <div className="lg:col-span-2 bg-indigo-600 p-8 rounded-[2.5rem] shadow-xl text-white flex items-center">
+                <div className="space-y-2">
                    <h2 className="font-black text-xl italic flex items-center gap-2"><Bell size={24}/> MISSION CONTROL</h2>
-                   <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">สถานะงานซ่อมและ QC ประจำตึกปัจจุบัน</p>
+                   <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">ชั้น 7 บ้านมั่งมี พร้อมใช้งานแล้ว</p>
                 </div>
               </div>
             </div>
@@ -204,7 +208,7 @@ export default function App() {
 
             {activeProperty?.floors.map(floor => (
               <div key={floor.level} className="space-y-4">
-                <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2 font-['Prompt']">ชั้น {floor.level}</h3>
+                <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2">ชั้น {floor.level}</h3>
                 <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
                   {floor.rooms.map(roomNo => {
                     const info = roomStates[`${activePropertyId}_${roomNo}`] || { status: 'rented' };
@@ -220,19 +224,19 @@ export default function App() {
             ))}
           </>
         ) : viewMode === 'archive' ? (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-in fade-in duration-300">
             <div className="flex justify-between items-center px-4">
                <h2 className="text-3xl font-black italic text-indigo-600 flex items-center gap-3"><Archive size={32}/> ARCHIVE</h2>
-               <button onClick={handleResetSystem} className="bg-rose-100 text-rose-600 px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 hover:bg-rose-600 hover:text-white transition-all uppercase"><Trash2 size={14}/> Reset All Data</button>
+               <button onClick={handleResetSystem} className="bg-rose-100 text-rose-600 px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 hover:bg-rose-600 hover:text-white transition-all"><Trash2 size={14}/> RESET SYSTEM</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white p-8 rounded-[3rem] border shadow-sm space-y-4 h-[60vh] overflow-y-auto">
-                <h3 className="font-black text-rose-500 text-xs flex items-center gap-2 uppercase"><Wrench size={16}/> Repair Logs</h3>
+                <h3 className="font-black text-rose-500 text-xs flex items-center gap-2 uppercase tracking-widest"><Wrench size={16}/> Repair History</h3>
                 {Object.entries(roomStates).filter(([_,v])=>v.repairData).map(([id, data]) => (
                     <div key={id} className="p-4 bg-slate-50 rounded-2xl border mb-3">
                       <p className="font-black text-xs text-indigo-600 mb-2">ห้อง {id.split('_')[1]}</p>
                       {Object.entries(data.repairData).filter(([_,rd])=>rd.checked).map(([name, rd]) => (
-                          <div key={name} className="flex justify-between text-[10px] font-bold py-0.5">
+                          <div key={name} className="flex justify-between text-[10px] font-bold py-0.5 border-b border-slate-100">
                             <span>• {name}</span><span className="text-rose-500">{rd.price}.-</span>
                           </div>
                       ))}
@@ -240,19 +244,19 @@ export default function App() {
                 ))}
               </div>
               <div className="bg-white p-8 rounded-[3rem] border shadow-sm space-y-4 h-[60vh] overflow-y-auto">
-                <h3 className="font-black text-indigo-500 text-xs flex items-center gap-2 uppercase"><ClipboardCheck size={16}/> QC Logs</h3>
+                <h3 className="font-black text-indigo-500 text-xs flex items-center gap-2 uppercase tracking-widest"><ClipboardCheck size={16}/> QC History</h3>
                 {Object.entries(roomStates).filter(([_,v])=>v.qcData).map(([id, data]) => (
                     <div key={id} className="p-4 bg-slate-50 rounded-2xl border mb-3">
                       <p className="font-black text-xs text-indigo-600 mb-2">ห้อง {id.split('_')[1]}</p>
-                      <p className="text-[9px] font-bold text-emerald-600 italic">QC ผ่าน 6 หมวดแล้ว</p>
-                      {data.qcNote && <p className="text-[9px] font-bold text-slate-400 mt-1">โน้ต: {data.qcNote}</p>}
+                      <p className="text-[9px] font-bold text-emerald-600 italic">ผ่าน QC 6 หมวดหลัก</p>
+                      {data.qcNote && <p className="text-[9px] font-bold text-slate-400 mt-2 bg-white p-2 rounded-lg border">โน้ต: {data.qcNote}</p>}
                     </div>
                 ))}
               </div>
             </div>
           </div>
         ) : (
-          <div className="bg-white p-8 rounded-[3rem] border shadow-sm">
+          <div className="bg-white p-8 rounded-[3rem] border shadow-sm animate-in fade-in duration-300">
              <h2 className="text-3xl font-black italic text-indigo-600 flex items-center gap-3 mb-6"><History size={32}/> TENANT HISTORY</h2>
              <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -260,10 +264,10 @@ export default function App() {
                    <tbody>
                       {tenantHistory.map((h, i) => (
                         <tr key={i} className="border-b last:border-0 hover:bg-slate-50 transition-all">
-                          <td className="py-4 px-4 font-black text-sm">{h.roomNo}<br/><span className="text-[9px] text-slate-400">{h.propertyName}</span></td>
+                          <td className="py-4 px-4 font-black text-sm">{h.roomNo}<br/><span className="text-[9px] text-slate-400 font-bold">{h.propertyName}</span></td>
                           <td className="py-4 px-4 font-bold text-xs">{h.tenantName}<br/><span className="text-[9px] text-slate-400">{h.tenantPhone}</span></td>
                           <td className="py-4 px-4 text-center text-[10px] font-black"><span className="text-emerald-500">{h.checkInDate}</span> - <span className="text-rose-500">{h.checkOutDate}</span></td>
-                          <td className="py-4 px-4 text-right"><span className="bg-slate-100 text-slate-400 px-3 py-1 rounded-full text-[9px] font-black">Checked Out</span></td>
+                          <td className="py-4 px-4 text-right"><span className="bg-slate-100 text-slate-400 px-3 py-1 rounded-full text-[9px] font-black uppercase">Checked Out</span></td>
                         </tr>
                       ))}
                    </tbody>
@@ -274,10 +278,10 @@ export default function App() {
       </main>
 
       {selectedRoom && (
-        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-50 p-4 font-['Prompt']">
-          <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in duration-200">
             <div className="p-8 border-b flex justify-between items-center bg-slate-50/50">
-              <div><h3 className="text-3xl font-black italic text-indigo-600">Room {selectedRoom}</h3><p className="text-[10px] font-bold text-slate-400 uppercase">{activeProperty.name}</p></div>
+              <div><h3 className="text-3xl font-black italic text-indigo-600">Room {selectedRoom}</h3><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{activeProperty.name}</p></div>
               <button onClick={() => setSelectedRoom(null)}><X size={32}/></button>
             </div>
             <div className="flex-1 overflow-y-auto p-8">
@@ -291,15 +295,15 @@ export default function App() {
                     <div className="bg-slate-50 p-6 rounded-3xl border-2 space-y-4 shadow-inner">
                        <h4 className="font-black flex items-center gap-2 text-indigo-600"><User size={18}/> ข้อมูลผู้เช่า</h4>
                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400">ชื่อ</p><input name="tName" defaultValue={info.tenantName} className="w-full p-4 rounded-xl border-2 font-bold outline-none focus:border-indigo-500" /></div>
-                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400">เบอร์</p><input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 rounded-xl border-2 font-bold outline-none focus:border-indigo-500" /></div>
-                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400">ค่าห้อง</p><input name="rPrice" defaultValue={info.roomPrice} className="w-full p-4 rounded-xl border-2 font-bold outline-none focus:border-indigo-500" /></div>
-                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400">ประกัน</p><input name="dPrice" defaultValue={info.depositPrice} className="w-full p-4 rounded-xl border-2 font-bold outline-none focus:border-indigo-500" /></div>
+                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400 uppercase">ชื่อ</p><input name="tName" defaultValue={info.tenantName} className="w-full p-4 rounded-xl border-2 font-bold focus:border-indigo-500 outline-none" /></div>
+                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400 uppercase">เบอร์</p><input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 rounded-xl border-2 font-bold focus:border-indigo-500 outline-none" /></div>
+                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400 uppercase">ค่าห้อง</p><input name="rPrice" defaultValue={info.roomPrice} className="w-full p-4 rounded-xl border-2 font-bold focus:border-indigo-500 outline-none" /></div>
+                          <div className="space-y-1"><p className="text-[9px] font-black px-2 text-slate-400 uppercase">ประกัน</p><input name="dPrice" defaultValue={info.depositPrice} className="w-full p-4 rounded-xl border-2 font-bold focus:border-indigo-500 outline-none" /></div>
                        </div>
                     </div>
-                    <div className="flex gap-3">
-                      <button type="button" onClick={()=>handleSave('saveTenant')} className="flex-1 bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg">บันทึกข้อมูล</button>
-                      {cur === 'rented' && <button type="button" onClick={()=>handleSave('noticeOut')} className="flex-1 bg-rose-500 text-white py-5 rounded-2xl font-black shadow-lg">แจ้งย้ายออก</button>}
+                    <div className="flex gap-3 pt-4 border-t">
+                      <button type="button" onClick={()=>handleSave('saveTenant')} className="flex-1 bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg hover:bg-indigo-700 transition-all">บันทึกข้อมูล</button>
+                      {cur === 'rented' && <button type="button" onClick={()=>handleSave('noticeOut')} className="flex-1 bg-rose-500 text-white py-5 rounded-2xl font-black shadow-lg hover:bg-rose-600 transition-all">แจ้งย้ายออก</button>}
                     </div>
                   </div>
                 );
@@ -309,23 +313,23 @@ export default function App() {
                     <Key size={64} className="mx-auto text-orange-400" />
                     <h4 className="font-black text-2xl text-orange-600 italic">Key Return Status</h4>
                     <div className="flex gap-2">
-                      <button type="button" onClick={()=>setKeyStatus('waiting')} className={`flex-1 py-5 rounded-2xl font-black border-2 transition-all ${keyStatus==='waiting'?'bg-orange-500 text-white border-orange-500 shadow-md':'bg-white text-orange-300'}`}>รอกุญแจ</button>
-                      <button type="button" onClick={()=>setKeyStatus('returned')} className={`flex-1 py-5 rounded-2xl font-black border-2 transition-all ${keyStatus==='returned'?'bg-green-500 text-white border-green-500 shadow-md':'bg-white text-green-300'}`}>คืนแล้ว</button>
+                      <button type="button" onClick={()=>setKeyStatus('waiting')} className={`flex-1 py-5 rounded-2xl font-black border-2 transition-all ${keyStatus==='waiting'?'bg-orange-500 text-white border-orange-500 shadow-lg':'bg-white text-orange-300'}`}>รอกุญแจ</button>
+                      <button type="button" onClick={()=>setKeyStatus('returned')} className={`flex-1 py-5 rounded-2xl font-black border-2 transition-all ${keyStatus==='returned'?'bg-green-500 text-white border-green-500 shadow-lg':'bg-white text-green-300'}`}>คืนแล้ว</button>
                     </div>
                   </div>
                 );
 
                 if (cur === 'pendingCheck') return (
                   <div className="bg-rose-50 p-6 rounded-3xl border-2 border-rose-100 space-y-6">
-                     <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm font-black text-xs mb-4"><p className="text-rose-500">Inspection Date</p><input type="date" name="sDate" className="outline-none" required /></div>
+                     <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm font-black text-xs mb-4 uppercase tracking-widest"><p className="text-rose-500">Inspection Date</p><input type="date" name="sDate" className="outline-none" required /></div>
                      {Object.entries(REPAIR_ITEMS_GENERAL).map(([group, items]) => (
                        <div key={group} className="space-y-2">
-                         <p className="text-[10px] font-black text-rose-300 uppercase px-2">{group}</p>
+                         <p className="text-[10px] font-black text-rose-300 uppercase px-2 tracking-widest">{group}</p>
                          {items.map(it => (
                            <div key={it} className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
-                             <label className="flex items-center gap-3 font-bold text-xs"><input type="checkbox" className="w-5 h-5 rounded-lg border-2 text-rose-500" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked}})} />{it}</label>
+                             <label className="flex items-center gap-3 font-bold text-xs cursor-pointer"><input type="checkbox" className="w-5 h-5 rounded-lg border-2 text-rose-500" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked}})} />{it}</label>
                              {repairs[it]?.checked && (
-                               <div className="flex gap-2 animate-in slide-in-from-top-1"><input placeholder="ราคา" className="w-24 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-black" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})} /><input placeholder="โน้ต" className="flex-1 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-bold" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})} /></div>
+                               <div className="flex gap-2 animate-in slide-in-from-top-1"><input placeholder="ราคา" className="w-24 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-black focus:border-rose-200 outline-none" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})} /><input placeholder="โน้ต" className="flex-1 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-bold focus:border-rose-200 outline-none" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})} /></div>
                              )}
                            </div>
                          ))}
@@ -338,17 +342,18 @@ export default function App() {
                    const items = Object.entries(info.repairData || {}).filter(([_,v])=>v.checked);
                    return (
                      <div className="space-y-6">
+                        <div className="flex justify-between items-center bg-amber-100 p-4 rounded-2xl border border-amber-200 text-xs font-black uppercase"><p>Repair Date</p><input type="date" name="sDate" className="bg-transparent font-bold outline-none"/></div>
                         <div className="bg-amber-50 p-6 rounded-3xl border-2 border-amber-200 space-y-4 shadow-sm">
-                           <h4 className="font-black text-amber-600 text-xs flex justify-between"><span>รายการซ่อม</span><span><Calendar size={14} className="inline mr-1"/> <input type="date" name="sDate" className="bg-transparent font-bold outline-none"/></span></h4>
+                           <h4 className="font-black text-amber-600 text-xs tracking-widest uppercase">รายการซ่อมที่ระบุไว้</h4>
                            {items.map(([name, val]) => (
-                             <div key={name} className="bg-white p-4 rounded-2xl border flex justify-between items-center text-xs">
-                                <div><p className="font-black">{name}</p><p className="text-[10px] text-amber-500 font-bold">{val.note || '-'}</p></div>
+                             <div key={name} className="bg-white p-4 rounded-2xl border-2 border-amber-100 flex justify-between items-center text-xs">
+                                <div><p className="font-black">{name}</p><p className="text-[10px] text-amber-500 font-bold italic">โน้ต: {val.note || '-'}</p></div>
                                 <div className="text-rose-500 font-black">{val.price || '0'}.-</div>
                              </div>
                            ))}
                         </div>
                         <div className="grid grid-cols-3 gap-2">
-                           {['pending', 'doing', 'done'].map(s => ( <button key={s} type="button" onClick={() => setProcStatus(s)} className={`py-4 rounded-xl font-black text-xs border-2 ${procStatus===s ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-300'}`}>{s==='pending'?'ยังไม่ทำ':s==='doing'?'กำลังทำ':'เสร็จแล้ว'}</button> ))}
+                           {['pending', 'doing', 'done'].map(s => ( <button key={s} type="button" onClick={() => setProcStatus(s)} className={`py-4 rounded-xl font-black text-xs border-2 transition-all ${procStatus===s ? 'bg-amber-500 text-white border-amber-500 shadow-md' : 'bg-white text-amber-300'}`}>{s==='pending'?'ยังไม่ทำ':s==='doing'?'กำลังทำ':'เสร็จแล้ว'}</button> ))}
                         </div>
                      </div>
                    );
@@ -356,23 +361,26 @@ export default function App() {
 
                 if (cur === 'finalQC') return (
                   <div className="bg-indigo-50 p-6 rounded-[2.5rem] border-2 border-indigo-100 space-y-6">
-                    <div className="flex justify-between items-center bg-white p-4 rounded-2xl border font-black text-xs shadow-sm"><p className="text-indigo-600">QC Date</p><input type="date" name="sDate" className="outline-none" required /></div>
+                    <div className="flex justify-between items-center bg-white p-4 rounded-2xl border text-xs font-black shadow-sm uppercase"><p className="text-indigo-600">QC Date</p><input type="date" name="sDate" className="outline-none" required /></div>
                     {QC_LIST.map(g => (
                       <div key={g.group} className="space-y-2">
-                        <p className="text-[10px] font-black text-indigo-300 uppercase px-2">{g.group}</p>
-                        {g.items.map(it => ( <label key={it} className="flex items-center gap-3 bg-white p-4 rounded-xl border font-bold text-xs shadow-sm cursor-pointer"><input type="checkbox" className="w-5 h-5 rounded-lg border-2" onChange={e => setQcStatus({...qcStatus, [it]: e.target.checked})} />{it}</label> ))}
+                        <p className="text-[10px] font-black text-indigo-300 uppercase px-2 tracking-widest">{g.group}</p>
+                        {g.items.map(it => ( <label key={it} className="flex items-center gap-3 bg-white p-4 rounded-xl border font-bold text-xs shadow-sm cursor-pointer hover:bg-indigo-50"><input type="checkbox" className="w-5 h-5 rounded-lg border-2" onChange={e => setQcStatus({...qcStatus, [it]: e.target.checked})} />{it}</label> ))}
                       </div>
                     ))}
-                    <textarea name="qcNote" defaultValue={info.qcNote || ""} placeholder="ระบุรายละเอียดเพิ่มเติม..." className="w-full p-4 h-32 rounded-2xl bg-slate-50 border-2 font-bold text-xs outline-none focus:border-indigo-400"></textarea>
+                    <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-2">
+                       <h4 className="font-black text-indigo-600 text-[10px] flex items-center gap-2 px-2 uppercase tracking-widest"><FileText size={14}/> รายละเอียดเพิ่มเติม</h4>
+                       <textarea name="qcNote" defaultValue={info.qcNote || ""} placeholder="..." className="w-full p-4 h-32 rounded-2xl bg-slate-50 border-2 font-bold text-xs outline-none focus:border-indigo-400"></textarea>
+                    </div>
                   </div>
                 );
 
                 if (['cleaning', 'cleaningPost'].includes(cur)) return (
                   <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 space-y-6 text-center shadow-inner">
                     <h4 className="font-black text-indigo-600 uppercase tracking-widest text-xs">{STATUS_FLOW[cur].label}</h4>
-                    <div className="flex justify-between items-center bg-white p-4 rounded-2xl border font-black text-xs outline-none"><p>Service Date</p><input type="date" name="sDate" required /></div>
+                    <div className="flex justify-between items-center bg-white p-4 rounded-2xl border font-black text-xs uppercase"><p>Service Date</p><input type="date" name="sDate" required /></div>
                     <div className="grid grid-cols-3 gap-2">
-                      {['pending', 'doing', 'done'].map(s => ( <button key={s} type="button" onClick={() => setProcStatus(s)} className={`py-4 rounded-xl font-black text-xs border-2 ${procStatus===s ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-300'}`}>{s==='pending'?'ยังไม่ทำ':s==='doing'?'กำลังทำ':'เสร็จแล้ว'}</button> ))}
+                      {['pending', 'doing', 'done'].map(s => ( <button key={s} type="button" onClick={() => setProcStatus(s)} className={`py-4 rounded-xl font-black text-xs border-2 transition-all ${procStatus===s ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-300'}`}>{s==='pending'?'ยังไม่ทำ':s==='doing'?'กำลังทำ':'เสร็จแล้ว'}</button> ))}
                     </div>
                   </div>
                 );
