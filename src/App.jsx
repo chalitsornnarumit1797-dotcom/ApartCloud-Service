@@ -54,7 +54,7 @@ const PROPERTIES = [
     id: 'mangmee', 
     name: 'บ้านมั่งมีทวีสุข', 
     floors: [
-      { level: 7, rooms: Array.from({ length: 18 }, (_, i) => `7${String(i + 1).padStart(2, '0')}`) }, // เพิ่มชั้น 7 แล้ว
+      { level: 7, rooms: Array.from({ length: 18 }, (_, i) => `7${String(i + 1).padStart(2, '0')}`) },
       { level: 6, rooms: Array.from({ length: 18 }, (_, i) => `6${String(i + 1).padStart(2, '0')}`) }, 
       { level: 5, rooms: Array.from({ length: 18 }, (_, i) => `5${String(i + 1).padStart(2, '0')}`) }, 
       { level: 4, rooms: Array.from({ length: 18 }, (_, i) => `4${String(i + 1).padStart(2, '0')}`) }, 
@@ -64,11 +64,22 @@ const PROPERTIES = [
     prices: "3,500 - 4,500"
   },
   { id: 'mytree', name: 'บ้านมายทรี 48', floors: [{ level: 5, rooms: ['501','502','503','505','506','507','508','509','510','511','512','513','514','515'] }, { level: 4, rooms: ['401','402','403','405','406','407','408','409','410','411','412','413','414','415'] }, { level: 3, rooms: ['301','302','303','305','306','307','308','309','310','311','312','313','314','315'] }, { level: 2, rooms: ['201','202','203','205','206','207','208','209','210','211','212','213','214','215'] }, { level: 1, rooms: Array.from({ length: 11 }, (_, i) => `1${String(i + 1).padStart(2, '0')}`) }], prices: "4,000 - 5,500" },
-  { id: 'khunluang', name: 'บ้านคุณหลวง', floors: [{ level: 4, rooms: Array.from({ length: 6 }, (_, i) => `4/${i + 1}`) }, { level: 3, rooms: Array.from({ length: 12 }, (_, i) => `3/${i + 1}`) }, { level: 2, rooms: Array.from({ length: 12 }, (_, i) => `2/${i + 1}`) }, { level: 1, rooms: Array.from({ length: 18 }, (_, i) => `1/${i + 1}`) }], prices: "3,000 - 4,200" },
+  { 
+    id: 'khunluang', 
+    name: 'บ้านคุณหลวง', 
+    floors: [
+      { level: 4, rooms: Array.from({ length: 6 }, (_, i) => `4-${i + 1}`) }, // แก้จาก / เป็น -
+      { level: 3, rooms: Array.from({ length: 12 }, (_, i) => `3-${i + 1}`) }, 
+      { level: 2, rooms: Array.from({ length: 12 }, (_, i) => `2-${i + 1}`) }, 
+      { level: 1, rooms: Array.from({ length: 18 }, (_, i) => `1-${i + 1}`) }
+    ],
+    prices: "3,000 - 4,200" 
+  },
   { id: 'meesap', name: 'อพาร์ทเม้นท์มีทรัพย์', floors: Array.from({ length: 5 }, (_, i) => ({ level: 5 - i, rooms: Array.from({ length: 6 }, (_, j) => `${5 - i}.${j + 1}`) })), prices: "3,200 - 3,800" },
   { id: 'meethong', name: 'อพาร์ทเม้นท์มีทอง', floors: Array.from({ length: 5 }, (_, i) => { const lv = 5 - i; return { level: lv, rooms: lv === 1 ? Array.from({ length: 11 }, (_, j) => `${102 + j}`) : Array.from({ length: 13 }, (_, j) => `${lv}${String(j + 1).padStart(2, '0')}`) }; }), prices: "3,800 - 4,800" }
 ];
 
+// ... โค้ดส่วนที่เหลือเหมือนเดิม (App Component) ...
 export default function App() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState("");
