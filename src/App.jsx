@@ -1,10 +1,12 @@
+// --- โค้ดชุดสมบูรณ์สำหรับ APART-CLOUD-SERVICE ---
+// ก๊อปปี้ไปวางทับ App.jsx ได้เลย ข้อมูลเดิมไม่หายครับ!
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, Sparkles, ClipboardCheck, Lock, Unlock, User, DollarSign, CheckCircle2, Key, Calendar, Save, LogOut, AlertCircle, FileText, PieChart, Bell, History, Archive, Trash2, ListChecks } from 'lucide-react';
 
-// --- Config & Firebase ---
 const ACCESS_PIN = "933979"; 
 const firebaseConfig = {
   apiKey: "AIzaSyASTtm9rgugCwKhcRC27j5ugJHFWbhM_8k",
@@ -50,9 +52,29 @@ const QC_LIST = [
 ];
 
 const PROPERTIES = [
-  { id: 'mangmee', name: 'บ้านมั่งมีทวีสุข', floors: [{ level: 7, rooms: Array.from({ length: 18 }, (_, i) => `7${String(i + 1).padStart(2, '0')}`) }, { level: 6, rooms: Array.from({ length: 18 }, (_, i) => `6${String(i + 1).padStart(2, '0')}`) }, { level: 5, rooms: Array.from({ length: 18 }, (_, i) => `5${String(i + 1).padStart(2, '0')}`) }, { level: 4, rooms: Array.from({ length: 18 }, (_, i) => `4${String(i + 1).padStart(2, '0')}`) }, { level: 3, rooms: Array.from({ length: 18 }, (_, i) => `3${String(i + 1).padStart(2, '0')}`) }, { level: 2, rooms: Array.from({ length: 18 }, (_, i) => `2${String(i + 1).padStart(2, '0')}`) }] },
+  { 
+    id: 'mangmee', 
+    name: 'บ้านมั่งมีทวีสุข', 
+    floors: [
+      { level: 7, rooms: Array.from({ length: 18 }, (_, i) => `7${String(i + 1).padStart(2, '0')}`) },
+      { level: 6, rooms: Array.from({ length: 18 }, (_, i) => `6${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 5, rooms: Array.from({ length: 18 }, (_, i) => `5${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 4, rooms: Array.from({ length: 18 }, (_, i) => `4${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 3, rooms: Array.from({ length: 18 }, (_, i) => `3${String(i + 1).padStart(2, '0')}`) }, 
+      { level: 2, rooms: Array.from({ length: 18 }, (_, i) => `2${String(i + 1).padStart(2, '0')}`) }
+    ]
+  },
   { id: 'mytree', name: 'บ้านมายทรี 48', floors: [{ level: 5, rooms: ['501','502','503','505','506','507','508','509','510','511','512','513','514','515'] }, { level: 4, rooms: ['401','402','403','405','406','407','408','409','410','411','412','413','414','415'] }, { level: 3, rooms: ['301','302','303','305','306','307','308','309','310','311','312','313','314','315'] }, { level: 2, rooms: ['201','202','203','205','206','207','208','209','210','211','212','213','214','215'] }, { level: 1, rooms: Array.from({ length: 11 }, (_, i) => `1${String(i + 1).padStart(2, '0')}`) }] },
-  { id: 'khunluang', name: 'บ้านคุณหลวง', floors: [{ level: 4, rooms: Array.from({ length: 6 }, (_, i) => `4-${i + 1}`) }, { level: 3, rooms: Array.from({ length: 12 }, (_, i) => `3-${i + 1}`) }, { level: 2, rooms: Array.from({ length: 12 }, (_, i) => `2-${i + 1}`) }, { level: 1, rooms: Array.from({ length: 18 }, (_, i) => `1-${i + 1}`) }] },
+  { 
+    id: 'khunluang', 
+    name: 'บ้านคุณหลวง', 
+    floors: [
+      { level: 4, rooms: Array.from({ length: 6 }, (_, i) => `4-${i + 1}`) }, 
+      { level: 3, rooms: Array.from({ length: 12 }, (_, i) => `3-${i + 1}`) }, 
+      { level: 2, rooms: Array.from({ length: 12 }, (_, i) => `2-${i + 1}`) }, 
+      { level: 1, rooms: Array.from({ length: 18 }, (_, i) => `1-${i + 1}`) }
+    ] 
+  },
   { id: 'meesap', name: 'อพาร์ทเม้นท์มีทรัพย์', floors: Array.from({ length: 5 }, (_, i) => ({ level: 5 - i, rooms: Array.from({ length: 6 }, (_, j) => `${5 - i}.${j + 1}`) })) },
   { id: 'meethong', name: 'อพาร์ทเม้นท์มีทอง', floors: Array.from({ length: 5 }, (_, i) => { const lv = 5 - i; return { level: lv, rooms: lv === 1 ? Array.from({ length: 11 }, (_, j) => `${102 + j}`) : Array.from({ length: 13 }, (_, j) => `${lv}${String(j + 1).padStart(2, '0')}`) }; }) }
 ];
@@ -109,7 +131,7 @@ export default function App() {
       updateData.depositPrice = formData.get('dPrice');
       updateData.checkInDate = new Date().toLocaleDateString('th-TH');
       updateData.inCheckQC = qcStatus; 
-      updateData.inCheckNote = formData.get('inCheckNote'); // บันทึกรายละเอียด QC ตอนย้ายเข้า
+      updateData.inCheckNote = formData.get('inCheckNote'); 
     } else if (mode === 'noticeOut') {
       await addDoc(collection(db, 'apartments', appId, 'history'), {
         roomNo: selectedRoom, propertyName: activeProperty.name,
@@ -152,7 +174,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-10 font-['Prompt'] text-slate-800">
-      <nav className="bg-white border-b p-4 sticky top-0 z-40 flex justify-between items-center shadow-sm px-6">
+      <nav className="bg-white border-b p-4 sticky top-0 z-40 flex justify-between items-center px-6 shadow-sm">
         <div className="font-black text-indigo-600 italic flex items-center gap-2 text-xl"><Building2 size={24}/> APARTCLOUD</div>
         <div className="flex gap-4">
            <button onClick={()=>setViewMode('grid')} className={`flex items-center gap-2 font-bold text-[10px] ${viewMode==='grid'?'text-indigo-600':'text-slate-400'}`}><PieChart size={18}/> ผังห้อง</button>
@@ -165,7 +187,7 @@ export default function App() {
       <main className="p-4 max-w-7xl mx-auto space-y-6">
         {viewMode === 'grid' ? (
           <>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 font-['Prompt']">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="bg-white p-6 rounded-[2.5rem] border shadow-sm space-y-4">
                 <h2 className="font-black text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><PieChart size={16}/> {activeProperty.name}</h2>
                 <div className="grid grid-cols-2 gap-2">
@@ -180,7 +202,7 @@ export default function App() {
               <div className="lg:col-span-2 bg-indigo-600 p-8 rounded-[2.5rem] shadow-xl text-white flex items-center relative overflow-hidden">
                 <div className="space-y-2 relative z-10">
                    <h2 className="font-black text-xl italic flex items-center gap-2 uppercase tracking-tighter"><Bell size={24}/> Mission Control</h2>
-                   <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">ยินดีต้อนรับสู่ระบบบริหารจัดการงานซ่อมและ QC</p>
+                   <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest font-['Prompt']">ชั้น 7 บ้านมั่งมี และ บ้านคุณหลวง พร้อมใช้งาน!</p>
                 </div>
               </div>
             </div>
@@ -193,8 +215,8 @@ export default function App() {
 
             {activeProperty?.floors.map(floor => (
               <div key={floor.level} className="space-y-4 font-['Prompt']">
-                <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2 font-bold">ชั้น {floor.level}</h3>
-                <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3 font-['Prompt']">
+                <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2 font-bold tracking-widest">ชั้น {floor.level}</h3>
+                <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
                   {floor.rooms.map(roomNo => {
                     const info = roomStates[`${activePropertyId}_${roomNo}`] || { status: 'rented' };
                     return (
@@ -209,11 +231,11 @@ export default function App() {
             ))}
           </>
         ) : viewMode === 'archive' ? (
-          <div className="space-y-6 font-['Prompt']">
+          <div className="space-y-6 font-['Prompt'] animate-in fade-in duration-300">
              <h2 className="text-3xl font-black italic text-indigo-600 flex items-center gap-3"><Archive size={32}/> ARCHIVE</h2>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-8 rounded-[3rem] border shadow-sm space-y-4">
-                   <h3 className="font-black text-rose-500 text-xs flex items-center gap-2 uppercase tracking-widest"><Wrench size={16}/> Repair History</h3>
+                   <h3 className="font-black text-rose-500 text-xs flex items-center gap-2 uppercase tracking-widest font-bold"><Wrench size={16}/> Repair History</h3>
                    <div className="space-y-3">
                       {Object.entries(roomStates).filter(([_,v])=>v.repairData).map(([id, data]) => (
                         <div key={id} className="p-4 bg-slate-50 rounded-2xl border">
@@ -226,14 +248,14 @@ export default function App() {
                    </div>
                 </div>
                 <div className="bg-white p-8 rounded-[3rem] border shadow-sm space-y-4">
-                   <h3 className="font-black text-indigo-500 text-xs flex items-center gap-2 uppercase tracking-widest"><ClipboardCheck size={16}/> QC History</h3>
+                   <h3 className="font-black text-indigo-500 text-xs flex items-center gap-2 uppercase tracking-widest font-bold"><ClipboardCheck size={16}/> QC History</h3>
                    <div className="space-y-3">
                       {Object.entries(roomStates).filter(([_,v])=>v.qcData || v.inCheckQC).map(([id, data]) => (
                         <div key={id} className="p-4 bg-slate-50 rounded-2xl border">
                            <p className="font-black text-xs text-indigo-600 mb-1 font-bold">ห้อง {id.split('_')[1]}</p>
-                           {data.inCheckQC && <p className="text-[9px] font-black text-emerald-500 uppercase">✓ ตรวจรับห้อง (In-Check) เรียบร้อย</p>}
-                           {data.qcData && <p className="text-[9px] font-black text-indigo-500 uppercase">✓ ตรวจก่อนขาย (Final QC) เรียบร้อย</p>}
-                           {data.inCheckNote && <p className="text-[8px] font-bold text-slate-400 italic mt-1">In-Check Note: {data.inCheckNote}</p>}
+                           {data.inCheckQC && <p className="text-[9px] font-black text-emerald-500 uppercase tracking-tighter">✓ ตรวจรับห้อง (In-Check) เรียบร้อย</p>}
+                           {data.qcData && <p className="text-[9px] font-black text-indigo-500 uppercase tracking-tighter">✓ ตรวจก่อนขาย (Final QC) เรียบร้อย</p>}
+                           {data.inCheckNote && <p className="text-[8px] font-bold text-slate-400 italic mt-1 border-t pt-1">ย้ายเข้า: {data.inCheckNote}</p>}
                         </div>
                       ))}
                    </div>
@@ -262,11 +284,10 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal จัดการงาน */}
       {selectedRoom && (
         <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-50 p-4 font-['Prompt']">
           <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in duration-200">
-            <div className="p-8 border-b flex justify-between items-center bg-slate-50/50 font-['Prompt']">
+            <div className="p-8 border-b flex justify-between items-center bg-slate-50/50">
               <div><h3 className="text-3xl font-black italic text-indigo-600 leading-none">Room {selectedRoom}</h3><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{activeProperty.name}</p></div>
               <button onClick={() => setSelectedRoom(null)}><X size={32}/></button>
             </div>
@@ -278,8 +299,8 @@ export default function App() {
 
                 if (cur === 'ready' || cur === 'rented') return (
                   <div className="space-y-6">
-                    <div className="bg-slate-50 p-6 rounded-3xl border-2 space-y-4 font-['Prompt']">
-                       <h4 className="font-black flex items-center gap-2 text-indigo-600"><User size={18}/> ข้อมูลผู้เช่า</h4>
+                    <div className="bg-slate-50 p-6 rounded-3xl border-2 space-y-4">
+                       <h4 className="font-black flex items-center gap-2 text-indigo-600 uppercase text-xs font-bold tracking-widest"><User size={18}/> ข้อมูลผู้เช่า</h4>
                        <div className="grid grid-cols-2 gap-3">
                           <input name="tName" defaultValue={info.tenantName} className="p-4 rounded-xl border-2 font-bold text-xs" placeholder="ชื่อ..." />
                           <input name="tPhone" defaultValue={info.tenantPhone} className="p-4 rounded-xl border-2 font-bold text-xs" placeholder="เบอร์..." />
@@ -287,9 +308,8 @@ export default function App() {
                           <input name="dPrice" defaultValue={info.depositPrice} className="p-4 rounded-xl border-2 font-bold text-xs" placeholder="ประกัน..." />
                        </div>
                     </div>
-
                     <div className="bg-emerald-50 p-6 rounded-3xl border-2 border-emerald-100 space-y-4">
-                       <h4 className="font-black flex items-center gap-2 text-emerald-600 uppercase text-[10px] tracking-widest"><ListChecks size={18}/> QC ก่อนส่งมอบห้อง</h4>
+                       <h4 className="font-black flex items-center gap-2 text-emerald-600 uppercase text-[10px] tracking-widest font-bold"><ListChecks size={18}/> QC ก่อนส่งมอบห้อง (In-Check)</h4>
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {QC_LIST.map(g => g.items.map(it => (
                             <label key={it} className="flex items-center gap-3 bg-white p-3 rounded-xl border font-bold text-[9px] cursor-pointer hover:bg-emerald-50 transition-colors">
@@ -298,13 +318,8 @@ export default function App() {
                             </label>
                           )))}
                        </div>
-                       {/* 🔥 ช่องระบุรายละเอียดเพิ่มเติม In-Check */}
-                       <div className="mt-4 space-y-2">
-                          <p className="text-[9px] font-black text-emerald-600 px-2 uppercase tracking-widest">รายละเอียดเพิ่มเติม (QC Note)</p>
-                          <textarea name="inCheckNote" defaultValue={info.inCheckNote || ""} placeholder="ระบุสภาพห้องเบื้องต้นตอนย้ายเข้า..." className="w-full p-4 h-24 rounded-2xl bg-white border-2 border-emerald-50 font-bold text-xs outline-none focus:border-emerald-300 transition-all resize-none font-['Prompt']"></textarea>
-                       </div>
+                       <textarea name="inCheckNote" defaultValue={info.inCheckNote || ""} placeholder="ระบุสภาพห้องเบื้องต้นตอนย้ายเข้า..." className="w-full p-4 h-24 rounded-2xl bg-white border-2 border-emerald-50 font-bold text-xs outline-none focus:border-emerald-300 resize-none font-['Prompt']"></textarea>
                     </div>
-
                     <div className="flex gap-3 pt-4 border-t">
                       <button type="button" onClick={()=>handleSave('saveTenant')} className="flex-1 bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg uppercase active:scale-95 transition-all">บันทึกข้อมูลและ QC</button>
                       {cur === 'rented' && <button type="button" onClick={()=>handleSave('noticeOut')} className="flex-1 bg-rose-500 text-white py-5 rounded-2xl font-black shadow-lg uppercase active:scale-95 transition-all">แจ้งย้ายออก</button>}
@@ -314,43 +329,41 @@ export default function App() {
 
                 if (cur === 'notice') return (
                   <div className="bg-orange-50 p-8 rounded-3xl border-2 border-orange-200 text-center space-y-6">
-                    <Key size={64} className="mx-auto text-orange-400" />
-                    <h4 className="font-black text-2xl text-orange-600 italic">Key Return</h4>
+                    <Key size={64} className="mx-auto text-orange-400 animate-bounce" />
+                    <h4 className="font-black text-2xl text-orange-600 italic tracking-tighter">Key Return</h4>
                     <div className="flex gap-2">
                       <button type="button" onClick={()=>setKeyStatus('waiting')} className={`flex-1 py-5 rounded-2xl font-black border-2 ${keyStatus==='waiting'?'bg-orange-500 text-white shadow-md':'bg-white text-orange-300'}`}>รอกุญแจ</button>
-                      <button type="button" onClick={()=>setKeyStatus('returned')} className={`flex-1 py-5 rounded-2xl font-black border-2 ${keyStatus==='returned'?'bg-green-500 text-white shadow-md':'bg-white text-green-300'}`}>ได้รับคืนแล้ว</button>
+                      <button type="button" onClick={()=>setKeyStatus('returned')} className={`flex-1 py-5 rounded-2xl font-black border-2 ${keyStatus==='returned'?'bg-green-500 text-white shadow-md':'bg-white text-green-300'}`}>คืนแล้ว</button>
                     </div>
                   </div>
                 );
 
-                if (cur === 'pendingCheck') return (
-                  <div className="bg-rose-50 p-6 rounded-3xl border-2 border-rose-100 space-y-6">
-                     <div className="flex justify-between items-center bg-white p-4 rounded-2xl border mb-4 font-black text-xs uppercase tracking-widest"><p className="text-rose-500">Inspection Date</p><input type="date" name="sDate" required /></div>
-                     {Object.entries(REPAIR_ITEMS_GENERAL).map(([group, items]) => (
-                       <div key={group} className="space-y-2">
-                         <p className="text-[10px] font-black text-rose-300 uppercase px-2">{group}</p>
-                         {items.map(it => (
-                           <div key={it} className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
-                             <label className="flex items-center gap-3 font-bold text-xs"><input type="checkbox" className="w-5 h-5 rounded-lg border-2 text-rose-500" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked}})} />{it}</label>
-                             {repairs[it]?.checked && (
-                               <div className="flex gap-2"><input placeholder="ราคา" className="w-24 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-black focus:border-rose-200 outline-none" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})} /><input placeholder="โน้ต" className="flex-1 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-bold focus:border-rose-200 outline-none" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})} /></div>
-                             )}
-                           </div>
-                         ))}
-                       </div>
-                     ))}
-                  </div>
-                );
-
-                if (cur === 'maintenance' || cur === 'finalQC' || ['cleaning', 'cleaningPost'].includes(cur)) {
+                if (cur === 'pendingCheck' || cur === 'finalQC' || ['cleaning', 'maintenance', 'cleaningPost'].includes(cur)) {
                    return (
-                     <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 text-center space-y-6 shadow-inner">
+                     <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 text-center space-y-6 shadow-inner font-['Prompt']">
                         <h4 className="font-black text-indigo-600 uppercase tracking-widest text-sm">{STATUS_FLOW[cur].label}</h4>
-                        <div className="flex justify-between items-center bg-white p-4 rounded-2xl border font-black text-[10px] uppercase tracking-tighter"><p>Select Date</p><input type="date" name="sDate" required /></div>
+                        <div className="flex justify-between items-center bg-white p-4 rounded-2xl border font-black text-[10px] uppercase tracking-widest"><p>Service Date</p><input type="date" name="sDate" required className="outline-none" /></div>
                         <div className="grid grid-cols-3 gap-2">
                            {['pending', 'doing', 'done'].map(s => ( <button key={s} type="button" onClick={() => setProcStatus(s)} className={`py-4 rounded-xl font-black text-xs border-2 ${procStatus===s ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-300'}`}>{s==='pending'?'ยังไม่ทำ':s==='doing'?'กำลังทำ':'เสร็จแล้ว'}</button> ))}
                         </div>
-                        {cur === 'finalQC' && <textarea name="qcNote" placeholder="รายละเอียดเพิ่มเติมหลังซ่อม..." className="w-full p-4 h-32 rounded-2xl border-2 font-bold text-xs outline-none focus:border-indigo-400 font-['Prompt']"></textarea>}
+                        {cur === 'pendingCheck' && (
+                          <div className="text-left space-y-4 pt-4 border-t">
+                            {Object.entries(REPAIR_ITEMS_GENERAL).map(([group, items]) => (
+                               <div key={group} className="space-y-2">
+                                 <p className="text-[10px] font-black text-rose-300 uppercase px-2">{group}</p>
+                                 {items.map(it => (
+                                   <div key={it} className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                                     <label className="flex items-center gap-3 font-bold text-xs"><input type="checkbox" className="w-5 h-5 rounded-lg border-2 text-rose-500" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked}})} />{it}</label>
+                                     {repairs[it]?.checked && (
+                                       <div className="flex gap-2"><input placeholder="ราคา" className="w-24 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-black" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})} /><input placeholder="โน้ต" className="flex-1 p-3 bg-slate-50 rounded-xl border-2 text-[10px] font-bold" onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})} /></div>
+                                     )}
+                                   </div>
+                                 ))}
+                               </div>
+                             ))}
+                          </div>
+                        )}
+                        {cur === 'finalQC' && <textarea name="qcNote" placeholder="รายละเอียดเพิ่มเติมหลังซ่อม..." className="w-full p-4 h-32 rounded-2xl border-2 font-bold text-xs outline-none focus:border-indigo-400"></textarea>}
                      </div>
                    );
                 }
@@ -360,7 +373,7 @@ export default function App() {
             </div>
             <div className="p-8 border-t bg-white">
               {!['ready', 'rented'].includes(roomStates[`${activePropertyId}_${selectedRoom}`]?.status || 'rented') && (
-                <button type="button" onClick={() => handleSave('forward')} className="w-full bg-slate-900 text-white py-6 rounded-[2.2rem] font-black text-xl shadow-xl uppercase active:scale-95 transition-all font-['Prompt']">
+                <button type="button" onClick={() => handleSave('forward')} className="w-full bg-slate-900 text-white py-6 rounded-[2.2rem] font-black text-xl shadow-xl uppercase active:scale-95 transition-all">
                   บันทึกสเตปถัดไป <CheckCircle2 />
                 </button>
               )}
