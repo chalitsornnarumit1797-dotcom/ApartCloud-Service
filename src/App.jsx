@@ -2,9 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor } from 'lucide-react';
+import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard } from 'lucide-react';
 
-// --- Firebase Config (ใช้ค่าเดิมของคุณ) ---
 const ACCESS_PIN = "933979"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
 const firebaseConfig = {
@@ -21,20 +20,28 @@ const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 const appId = 'apartcloud-service'; 
 
-// --- Configuration ---
-const STEPS = {
-  rented: { label: 'มีผู้เช่า', color: 'bg-slate-400', next: 'keyReturn' },
-  keyReturn: { label: 'รอคืนกุญแจ', color: 'bg-orange-400', next: 'pendingCheck' },
-  pendingCheck: { label: 'คิวตรวจห้อง/เงินประกัน', color: 'bg-rose-500', next: 'cleaningPre' },
-  cleaningPre: { label: 'ทำความสะอาดก่อนซ่อม', color: 'bg-sky-400', next: 'maintenance' },
-  maintenance: { label: 'เข้าซ่อมบำรุง', color: 'bg-amber-500', next: 'cleaningPost' },
-  cleaningPost: { label: 'ทำความสะอาดก่อนขาย', color: 'bg-cyan-500', next: 'finalQC' },
-  finalQC: { label: 'ตรวจความพร้อมก่อนขาย', color: 'bg-indigo-500', next: 'ready' },
-  ready: { label: 'พร้อมขาย', color: 'bg-emerald-500', next: 'rented' },
-  booked: { label: 'จองแล้ว', color: 'bg-purple-600', next: 'rented' }
+const BANK_ACCOUNTS = {
+  "บ้านมั่งมีทวีสุข": "กสิกรไทย: 051-1-88802-6 (ชวนันท์ สุขพรชัยรัก)",
+  "บ้านมายทรี 48": "ไทยพาณิชย์: 039-232971-2 (บริษัท มายทรี 48 จำกัด)",
+  "บ้านคุณหลวง": "ออมสิน: 020-2-2690349-8 (ชวนันท์ สุขพรชัยรัก)",
+  "มีทรัพย์": "อาคารสงเคราะห์: 206-1-10007-54-2 (Chawanan Sukpornchairak)",
+  "มีทอง": "กรุงไทย: 017-046047-9 (บริษัท ม.ทวีทอง จำกัด)"
 };
 
-// --- Checklist ตรวจคืนประกัน (28 ข้อ ตามสั่งนายเป๊ะๆ) ---
+const STEPS = {
+  ready:         { label: 'พร้อมขาย', color: 'bg-emerald-500', next: 'appointment', owner: 'sales' },
+  appointment:   { label: 'นัดดูห้อง', color: 'bg-pink-500', next: 'booked', owner: 'sales' },
+  booked:        { label: 'รอย้ายเข้า/ทำสัญญา', color: 'bg-purple-600', next: 'rented', owner: 'sales' },
+  rented:        { label: 'มีผู้เช่า', color: 'bg-slate-900', next: 'checkingOut', owner: 'sales' },
+  checkingOut:   { label: 'แจ้งย้ายออก', color: 'bg-rose-500', next: 'keyReturn', owner: 'sales' },
+  keyReturn:     { label: 'รอคืนกุญแจ', color: 'bg-amber-600', next: 'inspection', owner: 'sales' },
+  inspection:    { label: 'ลงคิวตรวจห้อง', color: 'bg-orange-500', next: 'cleaningPre', owner: 'sales' },
+  cleaningPre:   { label: 'ทำความสะอาดก่อนซ่อม', color: 'bg-blue-400', next: 'maintenance', owner: 'sales' },
+  maintenance:   { label: 'รอเข้าซ่อม', color: 'bg-amber-500', next: 'cleaningPost', owner: 'engineer' },
+  cleaningPost:  { label: 'ทำความสะอาดหลังซ่อม', color: 'bg-teal-400', next: 'finalQC', owner: 'sales' },
+  finalQC:       { label: 'ตรวจ QC 6 หมวด', color: 'bg-indigo-600', next: 'ready', owner: 'engineer' }
+};
+
 const CHECKLIST_OUT = {
   "1.หมวดกุญแจและระบบล็อค": [
     "กุญแจ (ลูกกุญแจ) / คีย์การ์ดหาย",
@@ -180,62 +187,83 @@ export default function App() {
   }, [roomStates, airPlans, wmPlans, activePropertyId]);
 
   const handleUpdateRoom = async (nextStep) => {
-    if (!workerName) return alert("ระบุชื่อผู้บันทึก!");
+    // 1. (ลบการเช็ค if (!workerName) ออกไปแล้ว)
+    
     const docId = `${activePropertyId}_${selectedRoom}`;
     const timestamp = new Date().toLocaleString('th-TH');
-    const info = roomStates[docId] || { status: 'rented' };
-    
-    let updateData = { ...info, status: nextStep, lastUpdateBy: workerName, lastUpdateTime: timestamp, propertyId: activePropertyId };
-    
-    if (info.status === 'rented') {
-      const form = document.getElementById('modalForm');
+    const info = roomStates[docId] || { status: 'ready' };
+
+    // 2. เช็คสิทธิ์ตามเจ้าของสเต็ปปัจจุบัน
+    const currentStepOwner = STEPS[info.status]?.owner;
+    if (currentStepOwner && currentStepOwner !== userRole) {
+      return alert(`ไม่อนุญาต! ขั้นตอนนี้สำหรับ ${currentStepOwner} เท่านั้น`);
+    }
+
+    // 3. เตรียมข้อมูลบันทึก (ระบุชื่อฝ่ายอัตโนมัติ)
+    let updateData = {
+      ...info,
+      status: nextStep,
+      // 🎯 เปลี่ยนจุดนี้: ให้บันทึกเป็นชื่อฝ่ายที่ Login อยู่แทน
+      lastUpdateBy: userRole === 'sales' ? 'ฝ่ายขาย (Sales)' : 'ฝ่ายช่าง (Engineer)',
+      lastUpdateTime: timestamp,
+      propertyId: activePropertyId
+    };
+
+    // 4. ดึงข้อมูลจาก Modal Form (ชื่อ, เบอร์, ยอดเงิน, ฯลฯ)
+    const form = document.getElementById('modalForm');
+    if (form) {
       const formData = new FormData(form);
-      updateData.tenantName = formData.get('tName'); 
-      updateData.tenantPhone = formData.get('tPhone'); 
-      // --- เพิ่มบรรทัดนี้เข้าไป ---
-      updateData.checkoutDate = formData.get('checkoutDate'); 
+      
+      // ดึงข้อมูลพื้นฐานถ้ามีการกรอก
+      if (formData.get('tName')) updateData.tenantName = formData.get('tName');
+      if (formData.get('tPhone')) updateData.tenantPhone = formData.get('tPhone');
+      if (formData.get('tDate')) updateData.appointmentDate = formData.get('tDate');
+      if (formData.get('tTime')) updateData.appointmentTime = formData.get('tTime');
+      if (formData.get('deposit')) updateData.deposit = formData.get('deposit');
+      if (formData.get('insurance')) updateData.insurance = formData.get('insurance');
+      if (formData.get('roomPrice')) updateData.roomPrice = formData.get('roomPrice');
+      if (formData.get('contractPeriod')) updateData.contractPeriod = formData.get('contractPeriod');
+      if (formData.get('checkoutDate')) updateData.checkoutDate = formData.get('checkoutDate');
+      if (formData.get('qcNote')) updateData.qcNote = formData.get('qcNote');
     }
 
-    if (info.status === 'pendingCheck') updateData.repairData = repairs;
-    if (info.status === 'finalQC') updateData.qcData = qcChecks;
+    // 5. บันทึกข้อมูล Checklist (ซ่อม/QC)
+    if (Object.keys(repairs).length > 0) updateData.repairData = repairs;
+    if (Object.keys(qcChecks).length > 0) updateData.qcData = qcChecks;
 
-    if (info.status === 'maintenance' && nextStep === 'cleaningPost') {
-      await addDoc(collection(db, 'apartments', appId, 'logs'), { 
-        roomKey: docId, action: "ซ่อมเสร็จเรียบร้อย", worker: workerName, timestamp: Date.now(), displayTime: timestamp, 
-        details: Object.keys(info.repairData || {}).join(', ') 
-      });
+    // 6. เคลียร์ข้อมูลเมื่อกลับไป "พร้อมขาย"
+    if (nextStep === 'ready') {
+      const keysToDelete = [
+        'repairData', 'qcData', 'qcNote', 'tenantName', 'tenantPhone',
+        'deposit', 'insurance', 'checkoutDate', 'appointmentDate', 'appointmentTime'
+      ];
+      keysToDelete.forEach(key => delete updateData[key]);
     }
 
-    if (nextStep === 'ready') { delete updateData.repairData; delete updateData.qcData; delete updateData.tenantName; }
-    
+    // 7. บันทึกลง Firebase
     await setDoc(doc(db, 'apartments', appId, 'rooms', docId), updateData);
-    setSelectedRoom(null); setRepairs({}); setQcChecks({});
+    
+    // 8. ปิด Modal และเคลียร์ค่าชั่วคราว
+    setSelectedRoom(null);
+    setRepairs({});
+    setQcChecks({});
   };
 
   const handleUpdatePlan = async (type, id, field, value) => {
-    if (!workerName) return alert("ระบุชื่อผู้บันทึก!");
+    
     const col = type === 'air' ? 'airPlans' : 'wmPlans';
     const docId = `${activePropertyId}_${id}`;
     const cur = (type === 'air' ? airPlans : wmPlans)[docId] || {};
-    await setDoc(doc(db, 'apartments', appId, col, docId), { ...cur, [field]: value, updateBy: workerName, updatedAt: new Date().toLocaleString('th-TH'), propertyId: activePropertyId });
+    await setDoc(doc(db, 'apartments', appId, col, docId), { ...cur, [field]: value, updateBy: userRole === 'sales' ? 'Sales' : 'Engineer', updatedAt: new Date().toLocaleString('th-TH'), propertyId: activePropertyId });
   };
 
   const saveTechnicalLog = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     await setDoc(doc(db, 'apartments', appId, 'roomSpecs', `${activePropertyId}_${selectedRoom}`), { 
-      airSpec: formData.get('air'), 
-      lightSpec: formData.get('light'), 
-      faucetSpec: formData.get('faucet'), 
-      chronicIssue: formData.get('chronic'),
-      // --- วางเพิ่มตรงนี้ (ล่าง chronic) ---
-      price: formData.get('price'), 
-      furnitures: formData.get('furnitures'),
-      photoUrl: formData.get('photoUrl'),
-      // -------------------------------
-      lastUpdate: new Date().toLocaleString('th-TH')
+      airSpec: formData.get('air'), lightSpec: formData.get('light'), faucetSpec: formData.get('faucet'), chronicIssue: formData.get('chronic'), lastUpdate: new Date().toLocaleString('th-TH')
     });
-    alert("บันทึกข้อมูล Master เรียบร้อย!");
+    alert("บันทึกสเปคเรียบร้อย!");
   };
 
   if (!userRole) {
@@ -289,63 +317,145 @@ export default function App() {
         </div>
 
         {viewMode === 'summary' ? (
-           <div className="space-y-6 animate-in fade-in font-sans">
-              {/* 🟢 หมวด: ห้องพร้อมขาย (ปิดงานได้ทันที) */}
-              <div className="bg-emerald-500 p-6 rounded-[2.5rem] text-white shadow-lg">
-                 <h4 className="font-black text-xs uppercase flex items-center gap-2 mb-4"><Tag size={18}/> ห้องว่างพร้อมขาย (Ready to Move)</h4>
-                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-                    {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'ready').map(([k,v]) => (
-                       <div key={k} className="bg-white/20 p-4 rounded-2xl text-center font-black text-xl italic">
-                          {k.split('_')[1]}
+            <div className="space-y-6 animate-in fade-in font-sans">
+              
+              {/* --- 🛠️ ส่วนของช่าง (ENGINEER) --- */}
+              {userRole === 'engineer' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* ภารกิจซ่อมวันนี้ */}
+                    <div className="bg-amber-500 p-8 rounded-[3rem] text-white shadow-lg">
+                      <h4 className="font-black text-xs uppercase mb-4 flex items-center gap-2"><Hammer size={18}/> ภารกิจซ่อมวันนี้</h4>
+                      <div className="space-y-3">
+                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'maintenance').map(([k,v]) => (
+                          <div key={k} className="bg-white/20 p-4 rounded-2xl flex justify-between items-center">
+                            <span className="font-black text-lg">ห้อง {k.split('_')[1]}</span>
+                            <span className="text-[10px] font-bold italic opacity-70">รอดำเนินการซ่อม</span>
+                          </div>
+                        ))}
+                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'maintenance').length === 0 && <p className="text-xs opacity-60 italic">ไม่มีงานซ่อมค้าง</p>}
+                      </div>
+                    </div>
+
+                    {/* คิวตรวจ QC */}
+                    <div className="bg-indigo-600 p-8 rounded-[3rem] text-white shadow-lg">
+                      <h4 className="font-black text-xs uppercase mb-4 flex items-center gap-2"><ShieldCheck size={18}/> คิวตรวจ QC 6 หมวด</h4>
+                      <div className="space-y-3">
+                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'finalQC').map(([k,v]) => (
+                          <div key={k} className="bg-white/20 p-4 rounded-2xl flex justify-between items-center">
+                            <span className="font-black text-lg">ห้อง {k.split('_')[1]}</span>
+                            <span className="text-[10px] font-bold italic opacity-70">รอตรวจก่อนส่งมอบ</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* งานล้างแอร์ & เครื่องซักผ้า */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-sky-500 p-8 rounded-[3rem] text-white shadow-lg">
+                       <h4 className="font-black text-xs uppercase mb-2 flex items-center gap-2"><Wind size={18}/> แผนล้างแอร์ประจำปี</h4>
+                       <div className="flex flex-wrap gap-2 mt-4">
+                          {Object.entries(airPlans).filter(([k,v]) => k.startsWith(activePropertyId) && !v.done).map(([k,v]) => (
+                            <span key={k} className="bg-white/20 px-4 py-2 rounded-xl font-black text-xs">{k.split('_')[1]}</span>
+                          ))}
                        </div>
-                    ))}
-                    {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'ready').length === 0 && (
-                       <p className="col-span-full text-center text-[10px] opacity-70 py-4 font-bold font-sans">--- ไม่มีห้องว่างในขณะนี้ ---</p>
-                    )}
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {/* 🟠 หมวด: กำลังรอซ่อม/ทำความสะอาด (แจ้งลูกค้าให้รอก่อนได้) */}
-                 <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white shadow-lg">
-                    <h4 className="font-black text-xs uppercase flex items-center gap-2 mb-4 font-sans"><Wrench size={18}/> อยู่ระหว่างเตรียมห้อง (Maintenance/Cleaning)</h4>
-                    <div className="space-y-3">
-                       {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost'].includes(v.status)).map(([k,v]) => (
-                          <div key={k} className="bg-white/10 p-4 rounded-2xl flex justify-between items-center">
-                             <span className="font-black text-lg">ห้อง {k.split('_')[1]}</span>
-                             <span className="bg-white/20 px-3 py-1 rounded-full text-[9px] font-black uppercase">{STEPS[v.status].label}</span>
-                          </div>
-                       ))}
                     </div>
-                 </div>
-
-                 {/* 🔴 หมวด: ลูกค้าแจ้งย้าย (ห้องจะว่างในอนาคต) */}
-                 <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white shadow-lg font-sans">
-                    <h4 className="font-black text-xs uppercase flex items-center gap-2 mb-4 font-sans"><Calendar size={18}/> ห้องที่มีการแจ้งย้ายออก (Upcoming Vacant)</h4>
-                    <div className="space-y-3 font-sans">
-                       {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').map(([k,v]) => (
-                          <div key={k} className="bg-white/10 p-4 rounded-2xl flex justify-between items-center font-sans">
-                             <div className="font-sans">
-                                <p className="font-black text-lg font-sans">ห้อง {k.split('_')[1]}</p>
-                                <p className="text-[10px] opacity-80 font-bold font-sans">📅 ว่างวันที่: {v.checkoutDate || 'ยังไม่ระบุ'}</p>
-                             </div>
-                             <span className="bg-white/20 px-3 py-1 rounded-full text-[9px] font-black uppercase font-sans">รอคืนกุญแจ</span>
-                          </div>
-                       ))}
+                    <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-lg">
+                       <h4 className="font-black text-xs uppercase mb-2 flex items-center gap-2"><WashingMachine size={18}/> รอบล้างเครื่องซักผ้า</h4>
+                       <p className="text-xl font-black mt-2">รอบ: {wmPlans[`${activePropertyId}_COMMON`]?.cycle === "1" ? "ม.ค.-มิ.ย." : "ก.ค.-ธ.ค."}</p>
+                       <p className="text-[10px] text-emerald-400 font-bold mt-2 uppercase tracking-widest">● {wmPlans[`${activePropertyId}_COMMON`]?.done ? "ดำเนินการแล้ว" : "รอดำเนินการ"}</p>
                     </div>
-                 </div>
-              </div>
+                  </div>
+                </div>
+              )}
 
-              {/* 🟣 หมวด: ห้องที่จองแล้ว */}
-              <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white shadow-lg">
-                 <h4 className="font-black text-xs uppercase flex items-center gap-2 mb-4 font-sans"><ShoppingBag size={18}/> รายการห้องที่จองแล้ว (Booked)</h4>
-                 <div className="flex flex-wrap gap-2">
-                    {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'booked').map(([k,v]) => (
-                       <span key={k} className="bg-white/20 px-6 py-2 rounded-xl font-black text-sm italic font-sans">{k.split('_')[1]}</span>
-                    ))}
-                 </div>
-              </div>
-           </div>
+              {/* --- 💰 [SECTION 2] สรุปสถานะสำหรับเซลล์ (SALES SUMMARY) --- */}
+              {userRole === 'sales' && (
+                <div className="space-y-6">
+                  {/* แถวบน: สรุปสถานะห้องสำคัญ 4 ด้าน */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-white">
+                    
+                    {/* 1. ห้องพร้อมขาย */}
+                    <div className="bg-emerald-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-emerald-700">
+                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Tag size={14}/> พร้อมขาย (Ready)</h4>
+                       <div className="flex flex-wrap gap-2">
+                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'ready').map(([k,v]) => (
+                            <span key={k} className="bg-white/20 px-3 py-1 rounded-lg font-black text-sm">{k.split('_')[1]}</span>
+                          ))}
+                       </div>
+                    </div>
+
+                    {/* 2. ห้องรอซ่อม/ทำความสะอาด (เพิ่มใหม่ให้นาย) */}
+                    <div className="bg-amber-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-amber-700">
+                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Wrench size={14}/> กำลังปรับปรุง (Repair)</h4>
+                       <div className="space-y-1">
+                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).map(([k,v]) => (
+                            <div key={k} className="flex justify-between items-center bg-white/10 px-2 py-1 rounded-lg">
+                               <span className="font-black text-xs">{k.split('_')[1]}</span>
+                               <span className="text-[8px] font-bold opacity-80 uppercase">{STEPS[v.status]?.label}</span>
+                            </div>
+                          ))}
+                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).length === 0 && <p className="text-[10px] italic opacity-60">ไม่มีห้องซ่อมค้าง</p>}
+                       </div>
+                    </div>
+
+                    {/* 3. แจ้งย้ายออกแล้ว */}
+                    <div className="bg-rose-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-rose-700">
+                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Calendar size={14}/> แจ้งย้าย (Notice)</h4>
+                       <div className="space-y-1">
+                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'checkingOut' || v.status === 'keyReturn')).map(([k,v]) => (
+                            <p key={k} className="text-[10px] font-bold">• {k.split('_')[1]} (ออก: {v.checkoutDate || 'TBD'})</p>
+                          ))}
+                       </div>
+                    </div>
+
+                    {/* 4. นัดหมายวันนี้ */}
+                    <div className="bg-purple-600 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-purple-800">
+                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Clock size={14}/> นัดย้ายเข้า/ดูห้อง</h4>
+                       <div className="space-y-1">
+                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).map(([k,v]) => (
+                            <p key={k} className="text-[10px] font-bold">• {k.split('_')[1]} ({v.appointmentTime || 'ไม่ระบุ'})</p>
+                          ))}
+                       </div>
+                    </div>
+
+                  </div>
+
+                  {/* ตารางสรุปเงินประกัน/หักค่าเสียหาย */}
+                  <div className="bg-white p-8 rounded-[3rem] border-2 shadow-sm overflow-hidden">
+                     <h4 className="font-black text-xs text-slate-400 uppercase mb-6 flex items-center gap-2"><ClipboardCheck size={18}/> สรุปรายการคืนเงินประกัน</h4>
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                           <thead className="text-[10px] font-black text-slate-300 uppercase border-b">
+                              <tr>
+                                 <th className="pb-4">ห้อง</th>
+                                 <th className="pb-4">ลูกค้า</th>
+                                 <th className="pb-4">เงินประกัน</th>
+                                 <th className="pb-4">หักเสียหาย</th>
+                                 <th className="pb-4">ยอดคืน</th>
+                              </tr>
+                           </thead>
+                           <tbody className="text-[11px] font-bold text-slate-600">
+                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.repairData).map(([k,v]) => {
+                                 const totalDamaged = Object.values(v.repairData).reduce((sum, item) => sum + Number(item.price || 0), 0);
+                                 return (
+                                    <tr key={k} className="border-b border-slate-50">
+                                       <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
+                                       <td className="py-4">{v.tenantName || '-'}</td>
+                                       <td className="py-4">{Number(v.insurance || 0).toLocaleString()} ฿</td>
+                                       <td className="py-4 text-rose-500">-{totalDamaged.toLocaleString()} ฿</td>
+                                       <td className="py-4 text-emerald-600 font-black">{(Number(v.insurance || 0) - totalDamaged).toLocaleString()} ฿</td>
+                                    </tr>
+                                 )
+                              })}
+                           </tbody>
+                        </table>
+                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
         ) : viewMode === 'airPlanner' ? (
            /* --- 🌪️ ตารางแผนแอร์ --- */
            <div className="bg-white rounded-[3rem] border shadow-2xl overflow-hidden font-sans">
@@ -411,7 +521,7 @@ export default function App() {
               <div className="bg-white p-4 rounded-3xl border shadow-sm flex items-center gap-4">
                  <UserCheck size={24} className="text-indigo-600" />
                  <input value={workerName} onChange={e => setWorkerName(e.target.value)} placeholder="ระบุชื่อผู้บันทึก..." className="w-full font-black text-sm outline-none bg-transparent" />
-              </div>
+               </div>
 
               {userRole === 'engineer' && (
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans font-sans font-sans">
@@ -437,15 +547,17 @@ export default function App() {
                    <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
                       {floor.rooms.map(roomNo => {
                         const info = roomStates[`${activePropertyId}_${roomNo}`] || { status: 'rented' };
-                        const isHidden = userRole==='sales' && !['ready', 'rented', 'booked'].includes(info.status);
+                        const stepConfig = STEPS[info.status] || STEPS.ready;
+                        const isNotMyTurn = userRole !== stepConfig.owner;
+                        const isHidden = isNotMyTurn && !(userRole === 'engineer' && info.status === 'ready');
                         return (
-                          <button key={roomNo} onClick={() => setSelectedRoom(roomNo)} className={`p-5 rounded-[2rem] font-black text-center shadow-sm border-b-4 border-black/10 transition-all font-sans font-sans ${STEPS[info.status]?.color || 'bg-slate-300'} text-white ${isHidden ? 'opacity-20' : 'active:scale-95 font-sans font-sans'}`}>
+                          <button key={roomNo} onClick={() => setSelectedRoom(roomNo)} className={`p-5 rounded-[2rem] font-black text-center shadow-sm border-b-4 border-black/10 transition-all font-sans font-sans ${STEPS[info.status]?.color || 'bg-slate-300'} text-white ${isHidden ? 'opacity-20 pointer-events-none' : 'active:scale-95'}`}>
                             <div className="text-lg leading-none">{roomNo}</div>
                             <div className="text-[7px] uppercase opacity-70 mt-1">{STEPS[info.status]?.label}</div>
                           </button>
                         );
                       })}
-                   </div>
+                   </div> 
                 </div>
               ))}
            </div>
@@ -475,6 +587,7 @@ export default function App() {
                          <div className="space-y-1 font-sans font-sans"><p className="text-[8px] font-black opacity-60">แอร์ (BTU/รุ่น)</p><input name="air" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.airSpec} className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-xs" /></div>
                          <div className="space-y-1 font-sans font-sans"><p className="text-[8px] font-black opacity-60">ไฟ (ขั้ว/วัตต์)</p><input name="light" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.lightSpec} className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-xs" /></div>
                          <div className="space-y-1 font-sans font-sans"><p className="text-[8px] font-black opacity-60 font-sans">ก๊อกน้ำ (รุ่น)</p><input name="faucet" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.faucetSpec} className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-xs" /></div>
+                         <div className="space-y-1 font-sans font-sans font-sans"><p className="text-[8px] font-black text-rose-400 font-sans">🚨 ปัญหาซ้ำซาก</p><input name="chronic" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.chronicIssue} className="w-full p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-xs text-rose-300 font-sans" /></div>
                          {/* --- วางล่างช่อง chronic --- */}
                         <div className="space-y-1 font-sans font-sans font-sans font-sans">
                            <p className="text-[8px] font-black opacity-60 uppercase pl-1 font-sans">ราคาเช่ารายเดือน</p>
@@ -489,7 +602,6 @@ export default function App() {
                            <textarea name="furnitures" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.furnitures} className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-xs min-h-[80px] font-sans" placeholder="ระบุรายการ..." />
                         </div>
                         {/* --- วางบนปุ่ม Submit --- */}
-                         <div className="space-y-1 font-sans font-sans font-sans"><p className="text-[8px] font-black text-rose-400 font-sans">🚨 ปัญหาซ้ำซาก</p><input name="chronic" defaultValue={roomSpecs[`${activePropertyId}_${selectedRoom}`]?.chronicIssue} className="w-full p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-xs text-rose-300 font-sans" /></div>
                          <button type="submit" className="md:col-span-2 w-full bg-indigo-600 py-3 rounded-xl font-black text-xs uppercase shadow-lg"><Save size={14} className="inline mr-2"/> Save Tech Specs</button>
                       </form>
                       <Wrench size={180} className="absolute -right-20 -bottom-20 opacity-10 rotate-12 font-sans" />
@@ -510,80 +622,159 @@ export default function App() {
                    {(() => {
                       const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'rented' };
                       const cur = info.status;
+                      //📌 1. สถานะ: นัดดูห้อง (Appointment)
+                      if (cur === 'appointment') return (
+                        <div className="space-y-6 font-sans">
+                           <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
+                              <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest pl-2">บันทึกการนัดหมายดูห้อง</p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อลูกค้า</p>
+                                    <input name="tName" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="ชื่อลูกค้าที่นัด" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
+                                    <input name="tPhone" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์ติดต่อ" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">วันที่นัด (กรอกมือ)</p>
+                                    <input name="tDate" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 12 เม.ย." />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เวลานัด (กรอกมือ)</p>
+                                    <input name="tTime" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 14:00 น." />
+                                 </div>
+                              </div>
+                           </div>
+                           <button type="button" onClick={() => handleUpdateRoom('booked')} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">ยืนยันการนัดดูห้อง</button>
+                        </div>
+                      );
 
-                      // --- 🏷️ SALES VIEW (Safe Version) ---
-                      if (userRole === 'sales') {
-                        const spec = roomSpecs[`${activePropertyId}_${selectedRoom}`] || {};
-                        const curStatus = roomStates[`${activePropertyId}_${selectedRoom}`]?.status || 'rented';
+                      //📌 2. สถานะ: รอย้ายเข้า (Booked/Move-in)
+                      if (cur === 'booked') return (
+                        <div className="space-y-6 font-sans">
+                           {/* 🏦 ส่วนแสดงเลขบัญชี (ดึงตาม Property ID) */}
+                           <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white shadow-xl">
+                              <p className="text-[10px] font-black opacity-50 uppercase mb-2 tracking-widest">บัญชีสำหรับรับโอนมัดจำ/ประกัน</p>
+                              <div className="flex items-center gap-4">
+                                 <div className="p-3 bg-white/10 rounded-2xl"><Building2 size={24}/></div>
+                                 <p className="font-black text-sm leading-tight text-emerald-400">
+                                    {BANK_ACCOUNTS[activeProperty?.name] || "กรุณาตรวจสอบเลขบัญชีกับผู้ดูแล"}
+                                 </p>
+                              </div>
+                           </div>
 
-                        return (
-                          <div className="space-y-6 animate-in zoom-in-95 duration-300 font-sans font-sans font-sans font-sans font-sans">
-                             {/* การ์ดราคา */}
-                             <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden font-sans font-sans">
-                                <div className="relative z-10 font-sans font-sans font-sans">
-                                   <p className="text-[10px] font-black opacity-60 uppercase mb-1 font-sans font-sans font-sans">Monthly Rate</p>
-                                   <div className="flex items-baseline gap-2 font-sans font-sans font-sans">
-                                      <span className="text-7xl font-black italic tracking-tighter font-sans font-sans">
-                                         {spec?.price || 'TBD'}
-                                      </span>
-                                      <span className="text-xl font-bold opacity-80 font-sans font-sans">฿</span>
-                                   </div>
-                                </div>
-                                {spec?.photoUrl && (
-                                   <a href={spec.photoUrl} target="_blank" rel="noreferrer" className="mt-6 flex items-center justify-center gap-2 w-full py-3 bg-white/20 backdrop-blur-md rounded-2xl border border-white/30 font-black hover:bg-white/40 transition-all font-sans font-sans">
-                                      <Camera size={18} className="font-sans font-sans"/> ดูรูปห้องจริง
-                                   </a>
-                                )}
-                                <ShoppingBag size={100} className="absolute -right-8 -bottom-8 opacity-10 rotate-12 font-sans font-sans" />
-                             </div>
+                           <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
+                              <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest pl-2">ข้อมูลการจองและค่าประกัน</p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อผู้เช่า</p>
+                                    <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
+                                    <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เงินมัดจำ (จอง)</p>
+                                    <input name="deposit" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm text-indigo-600" placeholder="เช่น 2,000" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เงินประกันหอพัก</p>
+                                    <input name="insurance" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm text-rose-600" placeholder="เช่น 5,000" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">วันที่ย้ายเข้า (กรอกมือ)</p>
+                                    <input name="tDate" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 1 พ.ค." />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เวลานัดย้ายเข้า</p>
+                                    <input name="tTime" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 10:00 น." />
+                                 </div>
+                              </div>
+                           </div>
 
-                             {/* รายการเฟอร์นิเจอร์ */}
-                             <div className="bg-white p-6 rounded-[2rem] border-2 shadow-sm space-y-3 font-sans font-sans font-sans">
-                                <h4 className="font-black text-indigo-600 uppercase text-xs flex items-center gap-2 font-sans font-sans font-sans"><Monitor size={16} className="font-sans font-sans"/> อุปกรณ์ภายในห้อง</h4>
-                                <p className="text-sm font-bold text-slate-600 italic bg-slate-50 p-4 rounded-2xl font-sans font-sans font-sans">
-                                   {spec?.furnitures || 'ยังไม่ได้ระบุข้อมูลอุปกรณ์'}
-                                </p>
-                             </div>
+                           <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95 border-b-[10px] border-purple-800">ยืนยันการทำสัญญา/ย้ายเข้า</button>
+                        </div>
+                      );
+                      
 
-                             {/* ปุ่มจองห้อง (Safe logic) */}
-                             {curStatus === 'ready' && (
-                                <button type="button" onClick={() => handleUpdateRoom('booked')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl font-sans font-sans font-sans">
-                              {/* --- ✅ ส่วนที่เพิ่ม: ผลตรวจความพร้อม (QC) สำหรับเซลล์เอาไว้โชว์ลูกค้า --- */}
-                            {info.qcData && (
-                               <div className="bg-emerald-50 p-6 rounded-[2.5rem] border-2 border-emerald-100 font-sans font-sans font-sans">
-                                  <h5 className="font-black text-emerald-600 uppercase text-[10px] mb-4 flex items-center gap-2 font-sans font-sans">
-                                     <ShieldCheck size={18} className="font-sans font-sans"/> รายการตรวจเช็คความพร้อมก่อนส่งมอบ (Room QC Passed)
-                                  </h5>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 font-sans">
-                                     {Object.entries(info.qcData).map(([name, checked]) => checked && (
-                                        <div key={name} className="flex items-center gap-2 text-[11px] font-bold text-emerald-700 font-sans font-sans">
-                                           <div className="w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center shrink-0">
-                                              <CheckCircle2 size={10} className="text-white font-sans"/>
-                                           </div>
-                                           {name}
-                                        </div>
-                                     ))}
-                                  </div>
-                                  <p className="mt-4 text-[9px] text-emerald-500 font-black italic border-t border-emerald-100 pt-3 font-sans">
-                                     * ห้องผ่านการตรวจสอบระบบไฟ ประปา แอร์ และความสะอาดมาตรฐานโครงการเรียบร้อยแล้ว
-                                  </p>
-                               </div>
-                            )}   
-                                   RESERVE NOW
-                                </button>
-                             )}
-                             
-                             {curStatus === 'booked' && (
-                                <div className="text-center p-8 bg-purple-50 rounded-[3rem] border-2 border-dashed border-purple-200 font-sans font-sans font-sans">
-                                   <p className="font-black text-purple-600 uppercase text-2xl font-sans font-sans font-sans">จองแล้ว</p>
-                                   <button type="button" onClick={() => handleUpdateRoom('ready')} className="text-slate-400 text-[10px] font-bold underline font-sans mt-4">ยกเลิก</button>
-                                </div>
-                             )}
-                          </div>
-                        );
-                      }
+                      //📌 4. สถานะ: มีผู้เช่า (Rented)
+                      if (cur === 'rented') return (
+                        <div className="space-y-6 font-sans">
+                           <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+                              <p className="text-[10px] font-black opacity-50 uppercase mb-4 tracking-widest">ข้อมูลผู้เช่าปัจจุบัน</p>
+                              <div className="space-y-4 relative z-10">
+                                 <div className="flex items-center gap-3">
+                                    <UserCheck size={20} className="text-indigo-400"/>
+                                    <p className="font-black text-xl">{info.tenantName || 'ไม่ระบุชื่อ'}</p>
+                                 </div>
+                                 <div className="flex items-center gap-3 opacity-80">
+                                    <Phone size={16}/>
+                                    <p className="font-bold text-sm">{info.tenantPhone || 'ไม่ระบุเบอร์'}</p>
+                                 </div>
+                              </div>
+                              <Monitor size={120} className="absolute -right-10 -bottom-10 opacity-10 rotate-12" />
+                           </div>
 
-                      // --- ENGINEER: แจ้งย้ายออก ---
+                           <div className="bg-white p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-inner space-y-5">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">รายละเอียดสัญญา</p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง (ระบุเอง)</p>
+                                    <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-indigo-600" placeholder="เช่น 4,500" />
+                                 </div>
+                                 <div className="space-y-1">
+                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ระยะสัญญา (ระบุเอง)</p>
+                                    <input name="contractPeriod" defaultValue={info.contractPeriod} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm" placeholder="เช่น 1 ปี / 6 เดือน" />
+                                 </div>
+                              </div>
+                           </div>
+
+                           <div className="grid grid-cols-1 gap-3">
+                              {/* ปุ่มที่ 1: บันทึกข้อมูลเฉยๆ สถานะไม่เปลี่ยน */}
+                              <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-xs hover:bg-slate-200 transition-all">
+                                 บันทึกข้อมูลสัญญา (Update Data)
+                              </button>
+
+                              {/* ปุ่มที่ 2: เปลี่ยนสถานะเป็นแจ้งย้ายออก */}
+                              <button type="button" onClick={() => handleUpdateRoom('checkingOut')} className="w-full bg-rose-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95 border-b-[10px] border-rose-700">
+                                 แจ้งย้ายออก (Notice Out)
+                              </button>
+                           </div>
+                        </div>
+                      );
+
+                      //📌 5. สถานะ: แจ้งย้ายออก (Checking Out)
+                      if (cur === 'checkingOut') return (
+                        <div className="space-y-6 font-sans">
+                           <div className="bg-rose-50 p-8 rounded-[2.5rem] border-2 border-rose-100 shadow-inner space-y-6">
+                              <div className="space-y-2">
+                                 <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest pl-2 flex items-center gap-2">
+                                    <Calendar size={16}/> ระบุวันที่ลูกค้าจะย้ายออก
+                                 </p>
+                                 <input type="date" name="checkoutDate" defaultValue={info.checkoutDate} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-xl text-rose-600 outline-none" />
+                              </div>
+                              <p className="text-[10px] font-bold text-slate-400 italic px-2">
+                                 * ห้องจะค้างอยู่ที่สถานะ "แจ้งย้ายออก" จนกว่านายจะกดปุ่ม "คืนกุญแจแล้ว"
+                              </p>
+                           </div>
+
+                           <div className="grid grid-cols-1 gap-3">
+                              {/* ปุ่มที่ 1: บันทึกแค่วันที่ สถานะอยู่ที่เดิม */}
+                              <button type="button" onClick={() => handleUpdateRoom('checkingOut')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-xs">
+                                 บันทึกวันที่ย้ายออก (Update Date)
+                              </button>
+
+                              {/* ปุ่มที่ 2: ไปต่อที่รอคืนกุญแจ/คืนแล้ว */}
+                              <button type="button" onClick={() => handleUpdateRoom('keyReturn')} className="w-full bg-slate-900 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl">
+                                 ดำเนินการคืนกุญแจ
+                              </button>
+                           </div>
+                        </div>
+                      ); 
+
+                      // ENGINEER: แจ้งย้ายออก
                       if (cur === 'rented') return (
                          <div className="space-y-6 font-sans font-sans">
                             <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-inner space-y-6">
@@ -597,7 +788,7 @@ export default function App() {
                                      <input name="tPhone" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm outline-none focus:border-indigo-400 font-sans" placeholder="08x-xxxxxxx" />
                                   </div>
                                </div>
-                               {/* --- 📅 ช่องวันที่ที่นายสั่งเพิ่ม --- */}
+                               // 📅 ช่องวันที่ที่นายสั่งเพิ่ม 
                                <div className="space-y-2 font-sans">
                                   <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest pl-2 font-sans">กำหนดวันย้ายออก (Check-out Date)</p>
                                   <input type="date" name="checkoutDate" className="w-full p-4 bg-white border-2 border-rose-100 rounded-2xl font-black text-lg outline-none focus:border-rose-400 font-sans text-rose-600" />
@@ -609,84 +800,204 @@ export default function App() {
                          </div>
                       );
 
-                      // --- ENGINEER: ตรวจประกัน (กาง 6 หมวดเต็ม) ---
-                      if (cur === 'pendingCheck') return (
-                         <div className="space-y-6 font-sans">
-                            <p className="text-[10px] font-black text-rose-500 uppercase flex items-center gap-2"><ClipboardCheck size={16}/> Checklist 6 หมวด (ตรวจคืนประกัน)</p>
-                            {Object.entries(CHECKLIST_OUT).map(([group, items]) => (
-                               <div key={group} className="space-y-2 font-sans font-sans">
-                                  <p className="text-[9px] font-black text-slate-400 bg-slate-50 p-2 rounded-lg">{group}</p>
-                                  {items.map(it => (
-                                     <div key={it} className="bg-white p-4 border rounded-2xl space-y-3 shadow-sm font-sans font-sans">
-                                        <label className="flex items-center gap-3 font-bold text-xs"><input type="checkbox" className="w-5 h-5 accent-rose-500" onChange={e => setRepairs({...repairs, [it]: {checked: e.target.checked}})} />{it}</label>
-                                        {repairs[it]?.checked && <div className="flex gap-2 font-sans font-sans"><input placeholder="ค่าซ่อม" className="w-20 p-2 bg-slate-50 border rounded-xl text-xs font-black font-sans font-sans" onChange={e=>setRepairs({...repairs, [it]:{...repairs[it], price: e.target.value}})}/><input placeholder="จุดที่เสีย..." className="flex-1 p-2 bg-slate-50 border rounded-xl text-xs font-sans font-sans" onChange={e=>setRepairs({...repairs, [it]:{...repairs[it], note: e.target.value}})}/><button type="button" className="p-2 bg-slate-100 rounded-xl text-slate-400"><Camera size={16}/></button></div>}
-                                     </div>
-                                  ))}
-                               </div>
-                            ))}
-                            <button type="button" onClick={() => handleUpdateRoom('cleaningPre')} className="w-full bg-indigo-600 text-white py-6 rounded-3xl font-black text-xl uppercase shadow-lg font-sans font-sans font-sans">ยืนยันผลตรวจ</button>
-                         </div>
-                      );
+                      //📌 7. สถานะ: ลงคิวตรวจห้องเพื่อคืนเงินประกัน (Inspection)
+                      if (cur === 'inspection') {
+                        const insurance = Number(info.insurance || 0);
+                        const totalRepair = Object.values(repairs).reduce((sum, item) => sum + Number(item.price || 0), 0);
+                        const finalRefund = insurance - totalRepair;
 
-                      // --- ENGINEER: หน้าซ่อม (ข้อมูลเด้งมาโชว์) ---
-                      if (cur === 'maintenance') return (
-                         <div className="space-y-6 font-sans font-sans font-sans">
-                            <div className="bg-amber-50 p-8 rounded-[3rem] border-2 border-amber-200 shadow-inner font-sans font-sans">
-                               <h4 className="font-black text-amber-600 uppercase text-xs mb-6 flex items-center gap-2 font-sans font-sans">
-                                  <Wrench size={18} className="font-sans font-sans"/> รายการที่ต้องดำเนินการซ่อม (จากผลตรวจประกัน)
-                               </h4>
-                               
-                               <div className="space-y-3 font-sans font-sans">
-                                  {Object.entries(info.repairData || {}).map(([k,v]) => v.checked && (
-                                     <div key={k} className="p-5 bg-white border-2 border-slate-50 rounded-[2rem] flex justify-between items-center shadow-sm font-sans font-sans">
-                                        <div className="font-sans font-sans">
-                                           <div className="flex items-center gap-2">
-                                              <p className="font-black text-sm text-slate-800 font-sans">{k}</p>
-                                              <span className="bg-rose-100 text-rose-600 px-2 py-0.5 rounded-lg text-[9px] font-black font-sans">
-                                                 ค่าซ่อม: {v.price || '0'} ฿
-                                              </span>
-                                           </div>
-                                           <p className="text-[11px] text-amber-500 font-bold italic mt-1 font-sans font-sans">
-                                              📌 หมายเหตุ: {v.note || 'ตรวจซ่อมตามมาตรฐาน'}
-                                           </p>
+                        return (
+                          <div className="space-y-6 font-sans">
+                            {/* 💰 การ์ดคำนวณเงินประกันอัตโนมัติ */}
+                            <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden border-b-[10px] border-indigo-500">
+                               <div className="relative z-10 grid grid-cols-2 gap-4">
+                                  <div>
+                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">เงินประกันตั้งต้น</p>
+                                     <p className="text-2xl font-black text-white">{insurance.toLocaleString()} ฿</p>
+                                  </div>
+                                  <div className="text-right">
+                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">รวมค่าเสียหาย</p>
+                                     <p className="text-2xl font-black text-rose-400">-{totalRepair.toLocaleString()} ฿</p>
+                                  </div>
+                                  <div className="col-span-2 pt-4 border-t border-white/10">
+                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest mb-1">
+                                        {finalRefund >= 0 ? "ยอดเงินที่ต้องคืนลูกค้า" : "🚨 ลูกค้าต้องจ่ายเพิ่ม (เกินวงเงินประกัน)"}
+                                     </p>
+                                     <p className={`text-5xl font-black italic tracking-tighter ${finalRefund >= 0 ? 'text-emerald-400' : 'text-rose-500 animate-pulse'}`}>
+                                        {Math.abs(finalRefund).toLocaleString()} ฿
+                                     </p>
+                                  </div>
+                               </div>
+                               <Banknote size={150} className="absolute -right-20 -bottom-20 opacity-10 rotate-12" />
+                            </div>
+
+                            {/* 📋 รายการหักค่าเสียหาย 6 หมวด (28 ข้อ) */}
+                            <div className="space-y-4">
+                               <p className="text-[10px] font-black text-rose-500 uppercase flex items-center gap-2 pl-2">
+                                  <ClipboardCheck size={16}/> รายการความเสียหาย (หักจากเงินประกัน)
+                               </p>
+                               {Object.entries(CHECKLIST_OUT).map(([group, items]) => (
+                                  <div key={group} className="space-y-2">
+                                     <p className="text-[9px] font-black text-slate-400 bg-slate-50 p-2 rounded-lg">{group}</p>
+                                     {items.map(it => (
+                                        <div key={it} className="bg-white p-4 border-2 rounded-2xl space-y-3 shadow-sm transition-all">
+                                           <label className="flex items-center gap-4 cursor-pointer font-bold text-xs">
+                                              <input 
+                                                type="checkbox" 
+                                                className="w-6 h-6 accent-rose-500 rounded-lg" 
+                                                checked={repairs[it]?.checked || false}
+                                                onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked, price: repairs[it]?.price || "0"}})} 
+                                              />
+                                              {it}
+                                           </label>
+                                           {repairs[it]?.checked && (
+                                              <div className="flex gap-2 animate-in slide-in-from-left-2">
+                                                 <input 
+                                                   type="number" 
+                                                   placeholder="ระบุราคา" 
+                                                   className="w-24 p-3 bg-rose-50 border-2 border-rose-100 rounded-xl text-xs font-black text-rose-600 outline-none" 
+                                                   value={repairs[it].price}
+                                                   onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})}
+                                                 />
+                                                 <input 
+                                                   placeholder="ระบุรายละเอียดเพิ่มเติม..." 
+                                                   className="flex-1 p-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-xs outline-none"
+                                                   onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})}
+                                                 />
+                                              </div>
+                                           )}
                                         </div>
-                                        <Camera className="text-slate-300 font-sans font-sans" size={24}/>
-                                     </div>
-                                  ))}
-                               </div>
-
-                               {Object.entries(info.repairData || {}).filter(([k,v]) => v.checked).length === 0 && (
-                                  <p className="text-center text-slate-400 text-xs py-4 font-bold font-sans italic">--- ไม่มีรายการเสีย/ชำรุด ---</p>
-                               )}
+                                     ))}
+                                  </div>
+                               ))}
                             </div>
 
-                            <button type="button" onClick={() => handleUpdateRoom('cleaningPost')} className="w-full bg-slate-900 text-white py-10 rounded-[3rem] font-black text-2xl shadow-xl uppercase font-sans font-sans transition-all active:scale-95 border-b-[10px] border-black/20 font-sans">
-                               บันทึก: ดำเนินการซ่อมเสร็จสิ้น
+                            <button 
+                              type="button" 
+                              onClick={() => handleUpdateRoom('cleaningPre')} 
+                              className="w-full bg-indigo-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95"
+                            >
+                               บันทึกผลการตรวจ & ส่งงานซ่อม
                             </button>
-                         </div>
+                          </div>
+                        );
+                      }
+
+                      //📌 9. สถานะ: รอเข้าซ่อม (Maintenance - หน้าช่าง)
+                      if (cur === 'maintenance') return (
+                        <div className="space-y-6 font-sans">
+                           <div className="bg-amber-500 p-8 rounded-[3rem] text-white shadow-xl relative overflow-hidden">
+                              <div className="relative z-10">
+                                 <h4 className="font-black uppercase text-xs mb-2 flex items-center gap-2 opacity-80">
+                                    <Hammer size={18}/> รายการที่ต้องดำเนินการซ่อม
+                                 </h4>
+                                 <p className="text-[10px] font-bold italic">ข้อมูลเด้งมาจากรายการที่เซลล์ตรวจหักเงินประกัน</p>
+                              </div>
+                              <Wrench size={120} className="absolute -right-10 -bottom-10 opacity-20 rotate-12" />
+                           </div>
+
+                           <div className="space-y-3">
+                              {Object.entries(info.repairData || {}).map(([k, v]) => v.checked && (
+                                 <div key={k} className="p-5 bg-white border-2 border-slate-100 rounded-[2rem] shadow-sm space-y-3">
+                                    <div className="flex justify-between items-start">
+                                       <div className="flex-1">
+                                          <p className="font-black text-slate-800 text-sm">{k}</p>
+                                          <p className="text-[10px] text-amber-600 font-bold italic mt-1">
+                                             📌 หมายเหตุเซลล์: {v.note || 'ไม่มีระบุ'}
+                                          </p>
+                                       </div>
+                                       <div className="text-right">
+                                          <p className="text-[8px] font-black text-slate-400 uppercase">งบที่หักมา</p>
+                                          <p className="text-xs font-black text-rose-500">{Number(v.price).toLocaleString()} ฿</p>
+                                       </div>
+                                    </div>
+                                    
+                                    {/* ช่องให้ช่างระบุราคาประเมินจริงเพื่อให้งบสมดุล */}
+                                    <div className="pt-3 border-t border-dashed flex items-center gap-3">
+                                       <p className="text-[9px] font-black text-slate-400 uppercase">ราคาประเมินจริง:</p>
+                                       <input 
+                                          type="number" 
+                                          placeholder="0"
+                                          className="flex-1 p-2 bg-slate-50 border rounded-xl text-xs font-black text-indigo-600 outline-none focus:border-indigo-300"
+                                          defaultValue={v.engineerPrice || v.price}
+                                          onChange={e => {
+                                             const newRepairData = { ...info.repairData, [k]: { ...v, engineerPrice: e.target.value } };
+                                             setRepairs(newRepairData); // ใช้ state เพื่อเตรียมบันทึก
+                                          }}
+                                       />
+                                    </div>
+                                 </div>
+                              ))}
+
+                              {/* กรณีไม่มีรายการซ่อม */}
+                              {Object.entries(info.repairData || {}).filter(([k,v]) => v.checked).length === 0 && (
+                                 <div className="text-center py-10 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
+                                    <p className="text-slate-400 font-bold text-xs italic">--- ไม่มีรายการที่ต้องซ่อม ---</p>
+                                 </div>
+                              )}
+                           </div>
+
+                           <div className="grid grid-cols-1 gap-3">
+                              <button 
+                                 type="button" 
+                                 onClick={() => handleUpdateRoom('cleaningPost')} 
+                                 className="w-full bg-slate-900 text-white py-10 rounded-[3rem] font-black text-2xl shadow-xl uppercase transition-all active:scale-95 border-b-[10px] border-black/20"
+                              >
+                                 บันทึก: ซ่อมเสร็จเรียบร้อย
+                              </button>
+                           </div>
+                        </div>
                       );
 
-                      // --- ENGINEER: Final QC (กางออกครบ) ---
+                      //📌 11. สถานะ: ตรวจ QC 6 หมวดก่อนเปิดขาย (Final QC - หน้าช่าง)
                       if (cur === 'finalQC') return (
-                         <div className="space-y-6 font-sans font-sans">
-                            <p className="text-[10px] font-black text-indigo-500 uppercase flex items-center gap-2 font-sans font-sans"><ShieldCheck size={16}/> QC 6 หมวดก่อนเปิดขาย</p>
-                            {Object.entries(CHECKLIST_QC).map(([group, items]) => (
-                               <div key={group} className="space-y-2 font-sans">
-                                  <p className="text-[9px] font-black text-indigo-400 bg-indigo-50 p-2 rounded-lg font-sans font-sans font-sans">{group}</p>
-                                  {items.map(it => <label key={it} className="flex items-center gap-4 bg-white p-4 border rounded-2xl cursor-pointer font-bold text-xs shadow-sm font-sans font-sans"><input type="checkbox" className="w-5 h-5 accent-emerald-500 font-sans font-sans" onChange={e => setQcChecks({...qcChecks, [it]: e.target.checked})} /> {it}</label>)}
-                               </div>
-                            ))}
-                            {/* --- 📝 เพิ่มช่องข้อเสนอแนะเพิ่มเติม (สไตล์นาย) --- */}
-                            <div className="mt-6 space-y-2 font-sans font-sans font-sans">
-                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2 font-sans font-sans">ข้อเสนอแนะ/จุดที่ต้องแก้ไขเพิ่มเติม</p>
-                               <textarea 
-                                  name="qcNote" 
-                                  placeholder="กรอกรายละเอียดเพิ่มเติมที่นี่..."
-                                  className="w-full p-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-[2rem] text-xs font-bold font-sans font-sans outline-none focus:border-indigo-300 min-h-[100px]"
-                               />
-                            </div>
-                            <button type="button" onClick={() => handleUpdateRoom('ready')} className="w-full bg-emerald-600 text-white py-6 rounded-3xl font-black text-xl uppercase shadow-lg font-sans font-sans font-sans">ผ่าน QC พร้อมเปิดขาย</button>
-                         </div>
+                        <div className="space-y-6 font-sans">
+                           <div className="bg-indigo-600 p-8 rounded-[3rem] text-white shadow-xl flex items-center gap-4">
+                              <ShieldCheck size={40} className="text-indigo-200" />
+                              <div>
+                                 <h4 className="font-black uppercase text-sm italic">Final Quality Control</h4>
+                                 <p className="text-[10px] font-bold opacity-70">ช่างตรวจสอบความเรียบร้อย 6 หมวดก่อนส่งมอบงาน</p>
+                              </div>
+                           </div>
+
+                           <div className="space-y-6">
+                              {Object.entries(CHECKLIST_QC).map(([group, items]) => (
+                                 <div key={group} className="space-y-3">
+                                    <p className="text-[10px] font-black text-indigo-500 bg-indigo-50 p-2 rounded-lg inline-block uppercase tracking-widest">{group}</p>
+                                    <div className="grid grid-cols-1 gap-2">
+                                       {items.map(it => (
+                                          <label key={it} className="flex items-center gap-4 bg-white p-4 border-2 border-slate-50 rounded-2xl cursor-pointer hover:border-indigo-100 transition-all shadow-sm">
+                                             <input 
+                                                type="checkbox" 
+                                                className="w-6 h-6 accent-emerald-500 rounded-lg"
+                                                checked={qcChecks[it] || false}
+                                                onChange={e => setQcChecks({...qcChecks, [it]: e.target.checked})} 
+                                             /> 
+                                             <span className="text-xs font-bold text-slate-700">{it}</span>
+                                          </label>
+                                       ))}
+                                    </div>
+                                 </div>
+                              ))}
+                           </div>
+
+                           <div className="bg-slate-50 p-6 rounded-[2.5rem] border-2 border-dashed border-slate-200 space-y-2">
+                              <p className="text-[10px] font-black text-slate-400 uppercase pl-2">ข้อเสนอแนะเพิ่มเติมจากช่าง</p>
+                              <textarea 
+                                 name="qcNote" 
+                                 placeholder="ระบุจุดที่อยากให้เซลล์ระวัง หรือข้อมูลเพิ่มเติม..."
+                                 className="w-full p-4 bg-white border-2 rounded-2xl text-xs font-bold outline-none focus:border-indigo-400 min-h-[100px]"
+                              />
+                           </div>
+
+                           <button 
+                              type="button" 
+                              onClick={() => handleUpdateRoom('ready')} 
+                              className="w-full bg-emerald-500 text-white py-10 rounded-[3rem] font-black text-2xl shadow-xl uppercase transition-all active:scale-95 border-b-[10px] border-emerald-700"
+                           >
+                              ผ่าน QC: เปิดขายห้องทันที
+                           </button>
+                        </div>
                       );
 
                       return <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-slate-900 text-white py-12 rounded-[2.5rem] font-black text-2xl uppercase shadow-2xl font-sans font-sans font-sans font-sans">{STEPS[cur].label} → {STEPS[STEPS[cur].next]?.label}</button>;
