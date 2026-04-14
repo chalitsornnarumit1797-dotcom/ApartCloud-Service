@@ -420,6 +420,39 @@ export default function App() {
                        </div>
                     </div>
 
+                  </div> {/* 👈 ปิด Grid 4 กล่องสี */}
+
+                  {/* 🎯 [วางตรงนี้เลยนาย!] ทะเบียนผู้เช่าปัจจุบัน */}
+                  <div className="bg-white p-8 rounded-[3rem] border-2 shadow-sm overflow-hidden mt-6">
+                     <h4 className="font-black text-xs text-slate-400 uppercase mb-6 flex items-center gap-2">
+                        <User size={18}/> ทะเบียนผู้เช่าปัจจุบัน (Active Tenants)
+                     </h4>
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                           <thead className="text-[10px] font-black text-slate-300 uppercase border-b">
+                              <tr>
+                                 <th className="pb-4">ห้อง</th>
+                                 <th className="pb-4">ชื่อผู้เช่า</th>
+                                 <th className="pb-4">เบอร์ติดต่อ</th>
+                                 <th className="pb-4">สถานะ</th>
+                              </tr>
+                           </thead>
+                           <tbody className="text-[11px] font-bold text-slate-600">
+                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').map(([k,v]) => (
+                                 <tr key={k} className="border-b border-slate-50 hover:bg-slate-50">
+                                    <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
+                                    <td className="py-4">{v.tenantName}</td>
+                                    <td className="py-4 font-mono">{v.tenantPhone || '-'}</td>
+                                    <td className="py-4">
+                                       <span className={`px-2 py-1 rounded-full text-[9px] font-black ${v.status === 'checkingOut' ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                          {v.status === 'checkingOut' ? 'แจ้งย้ายออก' : 'อยู่ปกติ'}
+                                       </span>
+                                    </td>
+                                 </tr>
+                              ))}
+                           </tbody>
+                        </table>
+                     </div>
                   </div>
 
                   {/* ตารางสรุปเงินประกัน/หักค่าเสียหาย */}
@@ -518,11 +551,6 @@ export default function App() {
         ) : (
            /* --- 🏢 ผังห้อง (Grid View) --- */
            <div className="space-y-6 animate-in fade-in font-sans">
-              <div className="bg-white p-4 rounded-3xl border shadow-sm flex items-center gap-4">
-                 <UserCheck size={24} className="text-indigo-600" />
-                 <input value={workerName} onChange={e => setWorkerName(e.target.value)} placeholder="ระบุชื่อผู้บันทึก..." className="w-full font-black text-sm outline-none bg-transparent" />
-               </div>
-
               {userRole === 'engineer' && (
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans font-sans font-sans">
                     <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white shadow-lg space-y-2">
@@ -539,6 +567,37 @@ export default function App() {
                        <WashingMachine size={24}/><p className="font-black text-[10px] mt-1 uppercase font-sans font-sans">{missions.wm ? 'ถึงรอบล้างเครื่อง' : 'เครื่องซักผ้าปกติ'}</p>
                     </div>
                  </div>
+              )}
+
+              {/* --- 💰 แจ้งเตือนภารกิจเซลล์ (Missions) ในหน้าผังห้อง --- */}
+              {userRole === 'sales' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 animate-in slide-in-from-top duration-500">
+                    <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
+                       <Key size={30} className="opacity-50" />
+                       <div>
+                          <h4 className="font-black text-[10px] uppercase tracking-widest">คืนกุญแจวันนี้</h4>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').map(([k,v]) => (
+                               <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">ห้อง {k.split('_')[1]}</span>
+                             ))}
+                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัดคืนกุญแจ</span>}
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
+                       <ShoppingBag size={30} className="opacity-50" />
+                       <div>
+                          <h4 className="font-black text-[10px] uppercase tracking-widest">นัดย้ายเข้า/ดูห้อง</h4>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).map(([k,v]) => (
+                               <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">ห้อง {k.split('_')[1]} ({v.appointmentTime || 'TBD'})</span>
+                             ))}
+                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัดหมาย</span>}
+                          </div>
+                       </div>
+                    </div>
+                </div>
               )}
 
               {activeProperty?.floors.map(floor => (
