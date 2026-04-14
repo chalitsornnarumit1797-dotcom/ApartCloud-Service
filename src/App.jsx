@@ -376,13 +376,36 @@ export default function App() {
                   {/* แถวบน: สรุปสถานะห้องสำคัญ 4 ด้าน */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-white">
                     
-                    {/* 1. ห้องพร้อมขาย */}
-                    <div className="bg-emerald-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-emerald-700">
-                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Tag size={14}/> พร้อมขาย (Ready)</h4>
-                       <div className="flex flex-wrap gap-2">
-                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'ready').map(([k,v]) => (
-                            <span key={k} className="bg-white/20 px-3 py-1 rounded-lg font-black text-sm">{k.split('_')[1]}</span>
-                          ))}
+                    {/* 1. ห้องพร้อมขาย (แบบแยกชั้น) */}
+                    <div className="bg-emerald-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-emerald-700 lg:col-span-2">
+                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Tag size={14}/> พร้อมขายแยกตามชั้น (Ready by Floor)</h4>
+                       <div className="space-y-3">
+                          {activeProperty?.floors.map(floor => {
+                             // กรองเฉพาะห้องในชั้นนี้ที่มีสถานะเป็น ready
+                             const readyRooms = floor.rooms.filter(r => roomStates[`${activePropertyId}_${r}`]?.status === 'ready');
+                             
+                             // ถ้าชั้นนี้ไม่มีห้องว่างเลย ไม่ต้องแสดงชื่อชั้น
+                             if (readyRooms.length === 0) return null;
+
+                             return (
+                                <div key={floor.level} className="flex items-start gap-3 bg-white/10 p-2 rounded-2xl">
+                                   <div className="bg-white/20 px-3 py-1 rounded-xl min-w-[60px] text-center">
+                                      <span className="font-black text-[10px] uppercase">ชั้น {floor.level}</span>
+                                   </div>
+                                   <div className="flex flex-wrap gap-2">
+                                      {readyRooms.map(room => (
+                                         <span key={room} className="bg-white text-emerald-600 px-3 py-1 rounded-lg font-black text-xs shadow-sm italic">
+                                            {room}
+                                         </span>
+                                      ))}
+                                   </div>
+                                </div>
+                             )
+                          })}
+                          {/* ถ้าไม่มีห้องว่างเลยทั้งตึก */}
+                          {Object.values(roomStates).filter(v => v.propertyId === activePropertyId && v.status === 'ready').length === 0 && (
+                             <p className="text-[10px] italic opacity-60 text-center py-4">--- ไม่มีห้องว่างพร้อมขายในขณะนี้ ---</p>
+                          )}
                        </div>
                     </div>
 
@@ -422,34 +445,65 @@ export default function App() {
 
                   </div> {/* 👈 ปิด Grid 4 กล่องสี */}
 
-                  {/* 🎯 [วางตรงนี้เลยนาย!] ทะเบียนผู้เช่าปัจจุบัน */}
+                  {/* 📋 ทะเบียนผู้เช่าปัจจุบัน (Active Tenants) */}
                   <div className="bg-white p-8 rounded-[3rem] border-2 shadow-sm overflow-hidden mt-6">
-                     <h4 className="font-black text-xs text-slate-400 uppercase mb-6 flex items-center gap-2">
-                        <User size={18}/> ทะเบียนผู้เช่าปัจจุบัน (Active Tenants)
-                     </h4>
+                     <div className="flex justify-between items-center mb-6">
+                        <h4 className="font-black text-xs text-slate-400 uppercase flex items-center gap-2">
+                           <User size={18}/> ทะเบียนผู้เช่าปัจจุบัน (Active Tenants)
+                        </h4>
+                     </div>
                      <div className="overflow-x-auto">
                         <table className="w-full text-left">
                            <thead className="text-[10px] font-black text-slate-300 uppercase border-b">
                               <tr>
                                  <th className="pb-4">ห้อง</th>
-                                 <th className="pb-4">ชื่อผู้เช่า</th>
-                                 <th className="pb-4">เบอร์ติดต่อ</th>
-                                 <th className="pb-4">สถานะ</th>
+                                 <th className="pb-4">ชื่อผู้เช่า / เบอร์โทร</th>
+                                 <th className="pb-4">วันที่เข้าอยู่</th>
+                                 <th className="pb-4 text-right">ราคาห้อง</th>
+                                 <th className="pb-4 text-center">จัดการ</th>
                               </tr>
                            </thead>
                            <tbody className="text-[11px] font-bold text-slate-600">
-                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').map(([k,v]) => (
-                                 <tr key={k} className="border-b border-slate-50 hover:bg-slate-50">
+                              {Object.entries(roomStates)
+                                .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready')
+                                .map(([k,v]) => (
+                                 <tr key={k} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                                     <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
-                                    <td className="py-4">{v.tenantName}</td>
-                                    <td className="py-4 font-mono">{v.tenantPhone || '-'}</td>
                                     <td className="py-4">
-                                       <span className={`px-2 py-1 rounded-full text-[9px] font-black ${v.status === 'checkingOut' ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                          {v.status === 'checkingOut' ? 'แจ้งย้ายออก' : 'อยู่ปกติ'}
-                                       </span>
+                                       <div className="font-black text-slate-800">{v.tenantName}</div>
+                                       <div className="text-[10px] text-slate-400 font-medium">{v.tenantPhone || '-'}</div>
+                                    </td>
+                                 {/* 1. ส่วนของ วันที่เข้าอยู่ */}
+                                    <td className="py-4 font-mono text-slate-500">
+                                       {/* ดึงจาก checkinDate หรือ date หรือ createdAt */}
+                                       {v.checkinDate || v.date || (v.lastUpdateTime ? v.lastUpdateTime.split(' ')[0] : '-')}
+                                    </td>
+
+                              {/* 2. ส่วนของ ราคาห้อง */}
+                              <td className="py-4 text-right font-black text-emerald-600">
+                                 {/* ดึงจาก roomPrice หรือ price หรือประกัน (insurance) หาร 2 หรือ 0 */}
+                                 {(v.roomPrice || v.price || 0).toLocaleString()} ฿
+                              </td>
+                                    <td className="py-4 text-center">
+                                       <button 
+                                          onClick={() => { 
+                                             setSelectedRoom(k.split('_')[1]); 
+                                             setViewMode('grid'); 
+                                          }}
+                                          className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                          title="แก้ไขข้อมูลห้องนี้"
+                                       >
+                                          <Settings size={14} />
+                                       </button>
                                     </td>
                                  </tr>
                               ))}
+                              {/* กรณีไม่มีข้อมูลผู้เช่าเลย */}
+                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').length === 0 && (
+                                 <tr>
+                                    <td colSpan="5" className="py-10 text-center text-slate-300 italic text-xs">--- ไม่พบข้อมูลผู้เช่าในขณะนี้ ---</td>
+                                 </tr>
+                              )}
                            </tbody>
                         </table>
                      </div>
