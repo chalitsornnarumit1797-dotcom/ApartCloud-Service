@@ -464,47 +464,44 @@ export default function App() {
                               </tr>
                            </thead>
                            <tbody className="text-[11px] font-bold text-slate-600">
-                              {Object.entries(roomStates)
-                                .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready')
-                                .map(([k,v]) => (
-                                 <tr key={k} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                                    <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
-                                    <td className="py-4">
-                                       <div className="font-black text-slate-800">{v.tenantName}</div>
-                                       <div className="text-[10px] text-slate-400 font-medium">{v.tenantPhone || '-'}</div>
-                                    </td>
-                                 {/* 1. ส่วนของ วันที่เข้าอยู่ */}
-                                    <td className="py-4 font-mono text-slate-500">
-                                       {/* ดึงจาก checkinDate หรือ date หรือ createdAt */}
-                                       {v.checkinDate || v.date || (v.lastUpdateTime ? v.lastUpdateTime.split(' ')[0] : '-')}
-                                    </td>
-
-                              {/* 2. ส่วนของ ราคาห้อง */}
-                              <td className="py-4 text-right font-black text-emerald-600">
-                                 {/* ดึงจาก roomPrice หรือ price หรือประกัน (insurance) หาร 2 หรือ 0 */}
-                                 {(v.roomPrice || v.price || 0).toLocaleString()} ฿
-                              </td>
-                                    <td className="py-4 text-center">
-                                       <button 
-                                          onClick={() => { 
-                                             setSelectedRoom(k.split('_')[1]); 
-                                             setViewMode('grid'); 
-                                          }}
-                                          className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
-                                          title="แก้ไขข้อมูลห้องนี้"
-                                       >
-                                          <Settings size={14} />
-                                       </button>
-                                    </td>
-                                 </tr>
-                              ))}
-                              {/* กรณีไม่มีข้อมูลผู้เช่าเลย */}
-                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').length === 0 && (
-                                 <tr>
-                                    <td colSpan="5" className="py-10 text-center text-slate-300 italic text-xs">--- ไม่พบข้อมูลผู้เช่าในขณะนี้ ---</td>
-                                 </tr>
-                              )}
-                           </tbody>
+  {Object.entries(roomStates)
+    .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready')
+    .map(([k,v], index) => {
+      // 🎯 แก้ปัญหาเรื่องราคาและวันที่ให้แสดงผลได้จากทุกฟิลด์
+      const displayPrice = v.roomPrice || v.price || '0';
+      const displayDate = v.tDate || v.appointmentDate || v.checkinDate || '-';
+      
+      return (
+        <tr key={k} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+          <td className="py-5 font-black text-slate-300 text-[10px]">{index + 1}</td>
+          <td className="py-5 font-black text-slate-900 text-lg">{k.split('_')[1]}</td>
+          <td className="py-5">
+            <div className="font-black text-slate-800">{v.tenantName}</div>
+            <div className="text-[10px] text-slate-400 font-medium">{v.tenantPhone || '-'}</div>
+          </td>
+          <td className="py-5 font-mono text-slate-500 text-sm">{displayDate}</td>
+          <td className="py-5 text-right font-black text-emerald-600 text-sm">
+            {String(displayPrice).replace(/,/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ฿
+          </td>
+          <td className="py-5 text-center">
+            <button 
+              onClick={() => { setSelectedRoom(k.split('_')[1]); setViewMode('grid'); setShowLogbook(false); }}
+              className="p-3 bg-slate-100 text-slate-400 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+            >
+              <Settings size={16} />
+            </button>
+          </td>
+        </tr>
+      );
+    })}
+  
+  {/* กรณีไม่มีข้อมูลผู้เช่า */}
+  {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').length === 0 && (
+    <tr>
+      <td colSpan="6" className="py-20 text-center text-slate-300 italic text-xs">--- ไม่พบข้อมูลผู้เช่าในขณะนี้ ---</td>
+    </tr>
+  )}
+</tbody>
                         </table>
                      </div>
                   </div>
@@ -735,128 +732,87 @@ export default function App() {
                    {(() => {
                       const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'rented' };
                       const cur = info.status;
-                      //📌 1. สถานะ: นัดดูห้อง (Appointment)
-                      if (cur === 'appointment') return (
-                        <div className="space-y-6 font-sans">
-                           <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
-                              <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest pl-2">บันทึกการนัดหมายดูห้อง</p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อลูกค้า</p>
-                                    <input name="tName" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="ชื่อลูกค้าที่นัด" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
-                                    <input name="tPhone" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์ติดต่อ" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">วันที่นัด (กรอกมือ)</p>
-                                    <input name="tDate" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 12 เม.ย." />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เวลานัด (กรอกมือ)</p>
-                                    <input name="tTime" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 14:00 น." />
-                                 </div>
-                              </div>
-                           </div>
-                           <button type="button" onClick={() => handleUpdateRoom('booked')} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">ยืนยันการนัดดูห้อง</button>
-                        </div>
-                      );
+                      // 📌 1. สถานะ: นัดดูห้อง (Appointment)
+if (cur === 'appointment') return (
+  <div className="space-y-6 font-sans">
+    <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
+      <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest pl-2">บันทึกการนัดหมายดูห้อง</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อลูกค้า</p>
+          <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="ชื่อลูกค้า" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
+          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์โทร" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2 text-rose-500">วันที่นัด (โชว์ที่หน้า Summary)</p>
+          <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="เช่น 15/04/2569" />
+        </div>
+      </div>
+    </div>
+    <button type="button" onClick={() => handleUpdateRoom('appointment')} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">ยืนยันการนัดดูห้อง</button>
+  </div>
+);
 
-                      //📌 2. สถานะ: รอย้ายเข้า (Booked/Move-in)
-                      if (cur === 'booked') return (
-                        <div className="space-y-6 font-sans">
-                           {/* 🏦 ส่วนแสดงเลขบัญชี (ดึงตาม Property ID) */}
-                           <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white shadow-xl">
-                              <p className="text-[10px] font-black opacity-50 uppercase mb-2 tracking-widest">บัญชีสำหรับรับโอนมัดจำ/ประกัน</p>
-                              <div className="flex items-center gap-4">
-                                 <div className="p-3 bg-white/10 rounded-2xl"><Building2 size={24}/></div>
-                                 <p className="font-black text-sm leading-tight text-emerald-400">
-                                    {BANK_ACCOUNTS[activeProperty?.name] || "กรุณาตรวจสอบเลขบัญชีกับผู้ดูแล"}
-                                 </p>
-                              </div>
-                           </div>
+// 📌 2. สถานะ: รอย้ายเข้า (Booked)
+if (cur === 'booked') return (
+  <div className="space-y-6 font-sans">
+    <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
+      <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest pl-2">ข้อมูลการจองและค่าประกัน</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อผู้เช่า</p>
+          <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง/เดือน</p>
+          <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600" placeholder="เช่น 5000" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2 text-purple-600">วันที่ย้ายเข้า (โชว์ที่หน้า Summary)</p>
+          <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600 outline-none" placeholder="เช่น 15/04/2569" />
+        </div>
+      </div>
+    </div>
+    <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800">ยืนยันการย้ายเข้า</button>
+  </div>
+);
 
-                           <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
-                              <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest pl-2">ข้อมูลการจองและค่าประกัน</p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อผู้เช่า</p>
-                                    <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
-                                    <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เงินมัดจำ (จอง)</p>
-                                    <input name="deposit" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm text-indigo-600" placeholder="เช่น 2,000" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เงินประกันหอพัก</p>
-                                    <input name="insurance" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm text-rose-600" placeholder="เช่น 5,000" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">วันที่ย้ายเข้า (กรอกมือ)</p>
-                                    <input name="tDate" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 1 พ.ค." />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">เวลานัดย้ายเข้า</p>
-                                    <input name="tTime" className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เช่น 10:00 น." />
-                                 </div>
-                              </div>
-                           </div>
+//📌 4. สถานะ: มีผู้เช่า (Rented)
+if (cur === 'rented') return (
+  <div className="space-y-6 font-sans">
+    <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+      <p className="text-[10px] font-black opacity-50 uppercase mb-4 tracking-widest">ข้อมูลผู้เช่าปัจจุบัน</p>
+      <div className="space-y-4 relative z-10">
+        <div className="flex items-center gap-3">
+          <UserCheck size={20} className="text-indigo-400"/>
+          <p className="font-black text-xl">{info.tenantName || 'ไม่ระบุชื่อ'}</p>
+        </div>
+      </div>
+    </div>
 
-                           <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95 border-b-[10px] border-purple-800">ยืนยันการทำสัญญา/ย้ายเข้า</button>
-                        </div>
-                      );
-                      
+    <div className="bg-white p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-inner space-y-5">
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">แก้ไขข้อมูล (Update ข้อมูลลง Summary)</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2 font-black text-indigo-600">ราคาค่าห้อง</p>
+          <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-indigo-600" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-slate-400 pl-2 font-black text-emerald-600">วันที่เข้าอยู่</p>
+          <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-emerald-600" />
+        </div>
+      </div>
+    </div>
 
-                      //📌 4. สถานะ: มีผู้เช่า (Rented)
-                      if (cur === 'rented') return (
-                        <div className="space-y-6 font-sans">
-                           <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                              <p className="text-[10px] font-black opacity-50 uppercase mb-4 tracking-widest">ข้อมูลผู้เช่าปัจจุบัน</p>
-                              <div className="space-y-4 relative z-10">
-                                 <div className="flex items-center gap-3">
-                                    <UserCheck size={20} className="text-indigo-400"/>
-                                    <p className="font-black text-xl">{info.tenantName || 'ไม่ระบุชื่อ'}</p>
-                                 </div>
-                                 <div className="flex items-center gap-3 opacity-80">
-                                    <Phone size={16}/>
-                                    <p className="font-bold text-sm">{info.tenantPhone || 'ไม่ระบุเบอร์'}</p>
-                                 </div>
-                              </div>
-                              <Monitor size={120} className="absolute -right-10 -bottom-10 opacity-10 rotate-12" />
-                           </div>
-
-                           <div className="bg-white p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-inner space-y-5">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">รายละเอียดสัญญา</p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง (ระบุเอง)</p>
-                                    <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-indigo-600" placeholder="เช่น 4,500" />
-                                 </div>
-                                 <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-slate-400 pl-2">ระยะสัญญา (ระบุเอง)</p>
-                                    <input name="contractPeriod" defaultValue={info.contractPeriod} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm" placeholder="เช่น 1 ปี / 6 เดือน" />
-                                 </div>
-                              </div>
-                           </div>
-
-                           <div className="grid grid-cols-1 gap-3">
-                              {/* ปุ่มที่ 1: บันทึกข้อมูลเฉยๆ สถานะไม่เปลี่ยน */}
-                              <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-xs hover:bg-slate-200 transition-all">
-                                 บันทึกข้อมูลสัญญา (Update Data)
-                              </button>
-
-                              {/* ปุ่มที่ 2: เปลี่ยนสถานะเป็นแจ้งย้ายออก */}
-                              <button type="button" onClick={() => handleUpdateRoom('checkingOut')} className="w-full bg-rose-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95 border-b-[10px] border-rose-700">
-                                 แจ้งย้ายออก (Notice Out)
-                              </button>
-                           </div>
-                        </div>
-                      );
+    <div className="grid grid-cols-1 gap-3">
+      <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-xs">บันทึกการแก้ไขข้อมูล</button>
+      <button type="button" onClick={() => handleUpdateRoom('checkingOut')} className="w-full bg-rose-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-rose-700">แจ้งย้ายออก (Notice Out)</button>
+    </div>
+  </div>
+);
 
                       //📌 5. สถานะ: แจ้งย้ายออก (Checking Out)
                       if (cur === 'checkingOut') return (
