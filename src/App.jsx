@@ -4,7 +4,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, where
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard } from 'lucide-react';
 
-const ACCESS_PIN = "933979"; // สำหรับ Engineer Mode
+const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
 const firebaseConfig = {
   apiKey: "AIzaSyASTtm9rgugCwKhcRC27j5ugJHFWbhM_8k",
@@ -275,7 +275,7 @@ export default function App() {
           <div className="space-y-2">
             <input type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-4 bg-slate-100 rounded-2xl text-center text-4xl font-bold border-2 outline-none" placeholder="PIN" />
             <div className="flex justify-between px-2 text-[8px] font-black uppercase text-slate-400">
-                <span>Engineer: 933979</span>
+                <span>Engineer: 222222</span>
                 <span>Sales: 111111</span>
             </div>
           </div>
