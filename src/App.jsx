@@ -732,9 +732,7 @@ export default function App() {
                    {(() => {
                       const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'rented' };
                       const cur = info.status;
-                      // ---------------------------------------------------------
-// 📌 1. สถานะ: นัดดูห้อง (Appointment)
-// ---------------------------------------------------------
+                      // 📌 1. สถานะ: นัดดูห้อง (Appointment)
 if (cur === 'appointment') return (
   <div className="space-y-6 font-sans">
     <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
@@ -754,15 +752,14 @@ if (cur === 'appointment') return (
         </div>
       </div>
     </div>
+    {/* 🎯 ปุ่มกด: กลับมาวนตามลูป STEPS[cur].next แล้วครับนาย! */}
     <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">
        ยืนยันการนัด → {STEPS[STEPS[cur].next]?.label}
     </button>
   </div>
 );
 
-// ---------------------------------------------------------
 // 📌 2. สถานะ: รอย้ายเข้า (Booked)
-// ---------------------------------------------------------
 if (cur === 'booked') return (
   <div className="space-y-6 font-sans">
     <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
@@ -774,20 +771,15 @@ if (cur === 'booked') return (
         </div>
         <div className="space-y-1">
           <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
-          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์โทร" />
+          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
         </div>
         <div className="space-y-1">
           <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง/เดือน</p>
           <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600" />
         </div>
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-rose-500 pl-2">เงินประกัน (Insurance)</p>
-          <input 
-            name="insurance" 
-            defaultValue={info.insurance || ""} 
-            className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" 
-            placeholder="ระบุเงินประกัน" 
-          />
+          <p className="text-[9px] font-bold text-rose-500 pl-2 uppercase">เงินประกัน (Insurance)</p>
+          <input name="insurance" defaultValue={info.insurance || ""} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="ระบุเงินประกัน" />
         </div>
         <div className="space-y-1 md:col-span-2">
           <p className="text-[9px] font-bold text-purple-600 pl-2">วันที่ย้ายเข้า</p>
@@ -795,8 +787,9 @@ if (cur === 'booked') return (
         </div>
       </div>
     </div>
-    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl">
-       ยืนยันสัญญา → {STEPS[STEPS[cur].next]?.label}
+    {/* 🎯 ปุ่มกด: วนเข้าสเต็ป 'rented' ตามคิวของนายเป๊ะ! */}
+    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800">
+       ยืนยันทำสัญญา → {STEPS[STEPS[cur].next]?.label}
     </button>
   </div>
 );
