@@ -732,7 +732,9 @@ export default function App() {
                    {(() => {
                       const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'rented' };
                       const cur = info.status;
-                      // 📌 1. สถานะ: นัดดูห้อง (Appointment)
+                      // ---------------------------------------------------------
+// 📌 1. สถานะ: นัดดูห้อง (Appointment)
+// ---------------------------------------------------------
 if (cur === 'appointment') return (
   <div className="space-y-6 font-sans">
     <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
@@ -746,17 +748,21 @@ if (cur === 'appointment') return (
           <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
           <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์โทร" />
         </div>
-        <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2 text-rose-500">วันที่นัด (โชว์ที่หน้า Summary)</p>
+        <div className="space-y-1 md:col-span-2">
+          <p className="text-[9px] font-bold text-rose-500 pl-2">วันที่นัด (โชว์ที่หน้า Summary)</p>
           <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="เช่น 15/04/2569" />
         </div>
       </div>
     </div>
-    <button type="button" onClick={() => handleUpdateRoom('appointment')} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">ยืนยันการนัดดูห้อง</button>
+    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">
+       ยืนยันการนัด → {STEPS[STEPS[cur].next]?.label}
+    </button>
   </div>
 );
 
+// ---------------------------------------------------------
 // 📌 2. สถานะ: รอย้ายเข้า (Booked)
+// ---------------------------------------------------------
 if (cur === 'booked') return (
   <div className="space-y-6 font-sans">
     <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
@@ -767,16 +773,31 @@ if (cur === 'booked') return (
           <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
         </div>
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง/เดือน</p>
-          <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600" placeholder="เช่น 5000" />
+          <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
+          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์โทร" />
         </div>
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2 text-purple-600">วันที่ย้ายเข้า (โชว์ที่หน้า Summary)</p>
-          <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600 outline-none" placeholder="เช่น 15/04/2569" />
+          <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง/เดือน</p>
+          <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-rose-500 pl-2">เงินประกัน (Insurance)</p>
+          <input 
+            name="insurance" 
+            defaultValue={info.insurance || ""} 
+            className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" 
+            placeholder="ระบุเงินประกัน" 
+          />
+        </div>
+        <div className="space-y-1 md:col-span-2">
+          <p className="text-[9px] font-bold text-purple-600 pl-2">วันที่ย้ายเข้า</p>
+          <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600" placeholder="เช่น 15/04/2569" />
         </div>
       </div>
     </div>
-    <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800">ยืนยันการย้ายเข้า</button>
+    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl">
+       ยืนยันสัญญา → {STEPS[STEPS[cur].next]?.label}
+    </button>
   </div>
 );
 
@@ -869,88 +890,92 @@ if (cur === 'rented') return (
                          </div>
                       );
 
-                      //📌 7. สถานะ: ลงคิวตรวจห้องเพื่อคืนเงินประกัน (Inspection)
-                      if (cur === 'inspection') {
-                        const insurance = Number(info.insurance || 0);
-                        const totalRepair = Object.values(repairs).reduce((sum, item) => sum + Number(item.price || 0), 0);
-                        const finalRefund = insurance - totalRepair;
+                      // 📌 7. สถานะ: ลงคิวตรวจห้องเพื่อคืนเงินประกัน (Inspection)
+if (cur === 'inspection') {
+  // 🎯 ดึงเงินประกันมาลบคอมม่าออกก่อนคำนวณ จะได้ไม่เป็น NaN
+  const insurance = Number(String(info.insurance || 0).replace(/,/g, ''));
+  
+  // 🎯 รวมค่าเสียหายที่ช่าง/เซลล์ ติ๊กเลือก
+  const totalRepair = Object.values(repairs).reduce((sum, item) => sum + Number(String(item.price || 0).replace(/,/g, '')), 0);
+  
+  const finalRefund = insurance - totalRepair;
 
-                        return (
-                          <div className="space-y-6 font-sans">
-                            {/* 💰 การ์ดคำนวณเงินประกันอัตโนมัติ */}
-                            <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden border-b-[10px] border-indigo-500">
-                               <div className="relative z-10 grid grid-cols-2 gap-4">
-                                  <div>
-                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">เงินประกันตั้งต้น</p>
-                                     <p className="text-2xl font-black text-white">{insurance.toLocaleString()} ฿</p>
-                                  </div>
-                                  <div className="text-right">
-                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">รวมค่าเสียหาย</p>
-                                     <p className="text-2xl font-black text-rose-400">-{totalRepair.toLocaleString()} ฿</p>
-                                  </div>
-                                  <div className="col-span-2 pt-4 border-t border-white/10">
-                                     <p className="text-[10px] font-black opacity-50 uppercase tracking-widest mb-1">
-                                        {finalRefund >= 0 ? "ยอดเงินที่ต้องคืนลูกค้า" : "🚨 ลูกค้าต้องจ่ายเพิ่ม (เกินวงเงินประกัน)"}
-                                     </p>
-                                     <p className={`text-5xl font-black italic tracking-tighter ${finalRefund >= 0 ? 'text-emerald-400' : 'text-rose-500 animate-pulse'}`}>
-                                        {Math.abs(finalRefund).toLocaleString()} ฿
-                                     </p>
-                                  </div>
-                               </div>
-                               <Banknote size={150} className="absolute -right-20 -bottom-20 opacity-10 rotate-12" />
-                            </div>
+  return (
+    <div className="space-y-6 font-sans">
+      {/* 💰 การ์ดคำนวณเงินประกันอัตโนมัติ */}
+      <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden border-b-[10px] border-indigo-500">
+        <div className="relative z-10 grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">เงินประกันตั้งต้น</p>
+            <p className="text-2xl font-black text-white">{insurance.toLocaleString()} ฿</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black opacity-50 uppercase tracking-widest">รวมค่าเสียหาย</p>
+            <p className="text-2xl font-black text-rose-400">-{totalRepair.toLocaleString()} ฿</p>
+          </div>
+          <div className="col-span-2 pt-4 border-t border-white/10">
+            <p className="text-[10px] font-black opacity-50 uppercase tracking-widest mb-1">
+              {finalRefund >= 0 ? "ยอดเงินที่ต้องคืนลูกค้า" : "🚨 ลูกค้าต้องจ่ายเพิ่ม (เกินวงเงินประกัน)"}
+            </p>
+            <p className={`text-5xl font-black italic tracking-tighter ${finalRefund >= 0 ? 'text-emerald-400' : 'text-rose-500 animate-pulse'}`}>
+              {Math.abs(finalRefund).toLocaleString()} ฿
+            </p>
+          </div>
+        </div>
+        <Banknote size={150} className="absolute -right-20 -bottom-20 opacity-10 rotate-12" />
+      </div>
 
-                            {/* 📋 รายการหักค่าเสียหาย 6 หมวด (28 ข้อ) */}
-                            <div className="space-y-4">
-                               <p className="text-[10px] font-black text-rose-500 uppercase flex items-center gap-2 pl-2">
-                                  <ClipboardCheck size={16}/> รายการความเสียหาย (หักจากเงินประกัน)
-                               </p>
-                               {Object.entries(CHECKLIST_OUT).map(([group, items]) => (
-                                  <div key={group} className="space-y-2">
-                                     <p className="text-[9px] font-black text-slate-400 bg-slate-50 p-2 rounded-lg">{group}</p>
-                                     {items.map(it => (
-                                        <div key={it} className="bg-white p-4 border-2 rounded-2xl space-y-3 shadow-sm transition-all">
-                                           <label className="flex items-center gap-4 cursor-pointer font-bold text-xs">
-                                              <input 
-                                                type="checkbox" 
-                                                className="w-6 h-6 accent-rose-500 rounded-lg" 
-                                                checked={repairs[it]?.checked || false}
-                                                onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked, price: repairs[it]?.price || "0"}})} 
-                                              />
-                                              {it}
-                                           </label>
-                                           {repairs[it]?.checked && (
-                                              <div className="flex gap-2 animate-in slide-in-from-left-2">
-                                                 <input 
-                                                   type="number" 
-                                                   placeholder="ระบุราคา" 
-                                                   className="w-24 p-3 bg-rose-50 border-2 border-rose-100 rounded-xl text-xs font-black text-rose-600 outline-none" 
-                                                   value={repairs[it].price}
-                                                   onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})}
-                                                 />
-                                                 <input 
-                                                   placeholder="ระบุรายละเอียดเพิ่มเติม..." 
-                                                   className="flex-1 p-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-xs outline-none"
-                                                   onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})}
-                                                 />
-                                              </div>
-                                           )}
-                                        </div>
-                                     ))}
-                                  </div>
-                               ))}
-                            </div>
+      {/* 📋 รายการหักค่าเสียหาย 6 หมวด */}
+      <div className="space-y-4">
+        <p className="text-[10px] font-black text-rose-500 uppercase flex items-center gap-2 pl-2">
+          <ClipboardCheck size={16}/> รายการความเสียหาย (หักจากเงินประกัน)
+        </p>
+        {Object.entries(CHECKLIST_OUT).map(([group, items]) => (
+          <div key={group} className="space-y-2">
+            <p className="text-[9px] font-black text-slate-400 bg-slate-50 p-2 rounded-lg">{group}</p>
+            {items.map(it => (
+              <div key={it} className="bg-white p-4 border-2 rounded-2xl space-y-3 shadow-sm">
+                <label className="flex items-center gap-4 cursor-pointer font-bold text-xs">
+                  <input 
+                    type="checkbox" 
+                    className="w-6 h-6 accent-rose-500 rounded-lg" 
+                    checked={repairs[it]?.checked || false}
+                    onChange={e => setRepairs({...repairs, [it]: {...repairs[it], checked: e.target.checked, price: repairs[it]?.price || "0"}})} 
+                  />
+                  {it}
+                </label>
+                {repairs[it]?.checked && (
+                  <div className="flex gap-2 animate-in slide-in-from-left-2">
+                    <input 
+                      type="text" 
+                      placeholder="ราคา" 
+                      className="w-24 p-3 bg-rose-50 border-2 border-rose-100 rounded-xl text-xs font-black text-rose-600 outline-none" 
+                      value={repairs[it].price}
+                      onChange={e => setRepairs({...repairs, [it]: {...repairs[it], price: e.target.value}})}
+                    />
+                    <input 
+                      placeholder="โน้ตเพิ่มเติม..." 
+                      className="flex-1 p-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-xs outline-none"
+                      onChange={e => setRepairs({...repairs, [it]: {...repairs[it], note: e.target.value}})}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
 
-                            <button 
-                              type="button" 
-                              onClick={() => handleUpdateRoom('cleaningPre')} 
-                              className="w-full bg-indigo-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95"
-                            >
-                               บันทึกผลการตรวจ & ส่งงานซ่อม
-                            </button>
-                          </div>
-                        );
-                      }
+      <button 
+        type="button" 
+        onClick={() => handleUpdateRoom('cleaningPre')} 
+        className="w-full bg-indigo-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95"
+      >
+        บันทึกผลการตรวจ & ส่งงานซ่อม
+      </button>
+    </div>
+  );
+}
 
                       //📌 9. สถานะ: รอเข้าซ่อม (Maintenance - หน้าช่าง)
                       if (cur === 'maintenance') return (
