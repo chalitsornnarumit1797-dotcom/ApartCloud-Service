@@ -187,8 +187,6 @@ export default function App() {
   }, [roomStates, airPlans, wmPlans, activePropertyId]);
 
   const handleUpdateRoom = async (nextStep) => {
-    // 1. (ลบการเช็ค if (!workerName) ออกไปแล้ว)
-    
     const docId = `${activePropertyId}_${selectedRoom}`;
     const timestamp = new Date().toLocaleString('th-TH');
     const info = roomStates[docId] || { status: 'ready' };
@@ -209,20 +207,22 @@ export default function App() {
       propertyId: activePropertyId
     };
 
-    // 4. ดึงข้อมูลจาก Modal Form (ชื่อ, เบอร์, ยอดเงิน, ฯลฯ)
+    // 4. ดึงข้อมูลจาก Modal Form (ฉบับปรับปรุงให้ตรงกับตาราง Summary)
     const form = document.getElementById('modalForm');
     if (form) {
       const formData = new FormData(form);
       
-      // ดึงข้อมูลพื้นฐานถ้ามีการกรอก
       if (formData.get('tName')) updateData.tenantName = formData.get('tName');
       if (formData.get('tPhone')) updateData.tenantPhone = formData.get('tPhone');
-      if (formData.get('tDate')) updateData.appointmentDate = formData.get('tDate');
-      if (formData.get('tTime')) updateData.appointmentTime = formData.get('tTime');
-      if (formData.get('deposit')) updateData.deposit = formData.get('deposit');
-      if (formData.get('insurance')) updateData.insurance = formData.get('insurance');
+      
+      // ✅ เปลี่ยนจาก appointmentDate เป็น tDate เพื่อให้โชว์ในตาราง Summary
+      if (formData.get('tDate')) updateData.tDate = formData.get('tDate'); 
+      
+      // ✅ เปลี่ยนจาก tTime เป็น appointmentTime ให้ตรงกับ name ใน input
+      if (formData.get('appointmentTime')) updateData.appointmentTime = formData.get('appointmentTime');
+      
       if (formData.get('roomPrice')) updateData.roomPrice = formData.get('roomPrice');
-      if (formData.get('contractPeriod')) updateData.contractPeriod = formData.get('contractPeriod');
+      if (formData.get('insurance')) updateData.insurance = formData.get('insurance');
       if (formData.get('checkoutDate')) updateData.checkoutDate = formData.get('checkoutDate');
       if (formData.get('qcNote')) updateData.qcNote = formData.get('qcNote');
     }
@@ -370,80 +370,107 @@ export default function App() {
                 </div>
               )}
 
-              {/* --- 💰 [SECTION 2] สรุปสถานะสำหรับเซลล์ (SALES SUMMARY) --- */}
-              {userRole === 'sales' && (
-                <div className="space-y-6">
-                  {/* แถวบน: สรุปสถานะห้องสำคัญ 4 ด้าน */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-white">
-                    
-                    {/* 1. ห้องพร้อมขาย (แบบแยกชั้น) */}
-                    <div className="bg-emerald-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-emerald-700 lg:col-span-2">
-                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Tag size={14}/> พร้อมขายแยกตามชั้น (Ready by Floor)</h4>
-                       <div className="space-y-3">
-                          {activeProperty?.floors.map(floor => {
-                             // กรองเฉพาะห้องในชั้นนี้ที่มีสถานะเป็น ready
-                             const readyRooms = floor.rooms.filter(r => roomStates[`${activePropertyId}_${r}`]?.status === 'ready');
-                             
-                             // ถ้าชั้นนี้ไม่มีห้องว่างเลย ไม่ต้องแสดงชื่อชั้น
-                             if (readyRooms.length === 0) return null;
+              {/* --- 💰 [SECTION 2] สรุปสถานะสำหรับเซลล์ (SALES SUMMARY) ฉบับ 5 กล่อง 5 สี --- */}
+{userRole === 'sales' && (
+  <div className="space-y-6 font-sans">
+    {/* แถวบน: สรุปสถานะห้องสำคัญ 5 ด้าน (แยกสีชัดเจน) */}
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 text-white">
+      
+      {/* 🟢 1. ห้องพร้อมขาย (แบบแยกชั้น) - คงเดิม (emerald) */}
+      <div className="bg-emerald-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-emerald-700 lg:col-span-1">
+         <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Tag size={14}/> พร้อมขายแยกตามชั้น (Ready by Floor)</h4>
+         <div className="space-y-3">
+            {activeProperty?.floors.map(floor => {
+               const readyRooms = floor.rooms.filter(r => roomStates[`${activePropertyId}_${r}`]?.status === 'ready');
+               if (readyRooms.length === 0) return null;
+               return (
+                  <div key={floor.level} className="flex items-start gap-3 bg-white/10 p-2 rounded-2xl">
+                     <div className="bg-white/20 px-3 py-1 rounded-xl min-w-[60px] text-center">
+                        <span className="font-black text-[10px] uppercase">ชั้น {floor.level}</span>
+                     </div>
+                     <div className="flex flex-wrap gap-2 hover:opacity-80 transition-opacity">
+                        {readyRooms.map(room => (
+                           <button key={room} onClick={() => { setSelectedRoom(room); setViewMode('grid'); }} className="bg-white text-emerald-600 px-3 py-1 rounded-lg font-black text-xs shadow-sm italic active:scale-95 transition-all">{room}</button>
+                        ))}
+                     </div>
+                  </div>
+               )
+            })}
+            {Object.values(roomStates).filter(v => v.propertyId === activePropertyId && v.status === 'ready').length === 0 && (
+               <p className="text-[10px] italic opacity-60 text-center py-4">--- ไม่มีห้องว่างพร้อมขาย ---</p>
+            )}
+         </div>
+      </div>
 
-                             return (
-                                <div key={floor.level} className="flex items-start gap-3 bg-white/10 p-2 rounded-2xl">
-                                   <div className="bg-white/20 px-3 py-1 rounded-xl min-w-[60px] text-center">
-                                      <span className="font-black text-[10px] uppercase">ชั้น {floor.level}</span>
-                                   </div>
-                                   <div className="flex flex-wrap gap-2">
-                                      {readyRooms.map(room => (
-                                         <span key={room} className="bg-white text-emerald-600 px-3 py-1 rounded-lg font-black text-xs shadow-sm italic">
-                                            {room}
-                                         </span>
-                                      ))}
-                                   </div>
-                                </div>
-                             )
-                          })}
-                          {/* ถ้าไม่มีห้องว่างเลยทั้งตึก */}
-                          {Object.values(roomStates).filter(v => v.propertyId === activePropertyId && v.status === 'ready').length === 0 && (
-                             <p className="text-[10px] italic opacity-60 text-center py-4">--- ไม่มีห้องว่างพร้อมขายในขณะนี้ ---</p>
-                          )}
-                       </div>
-                    </div>
+      {/* 🔴 2. แจ้งย้าย (Notice) - คงเดิม (rose) */}
+      <div className="bg-rose-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-rose-700 lg:col-span-1">
+         <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Calendar size={14}/> แจ้งย้าย (Notice)</h4>
+         <div className="space-y-1.5">
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'checkingOut' || v.status === 'keyReturn')).map(([k,v]) => (
+              <p key={k} className="text-[10px] font-bold leading-tight">• {k.split('_')[1]} (ออก: {v.tDate || v.checkoutDate || 'TBD'})</p>
+            ))}
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'checkingOut' || v.status === 'keyReturn')).length === 0 && (
+               <p className="text-[10px] italic opacity-60">--- ไม่มีแจ้งย้าย ---</p>
+            )}
+         </div>
+      </div>
 
-                    {/* 2. ห้องรอซ่อม/ทำความสะอาด (เพิ่มใหม่ให้นาย) */}
-                    <div className="bg-amber-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-amber-700">
-                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Wrench size={14}/> กำลังปรับปรุง (Repair)</h4>
-                       <div className="space-y-1">
-                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).map(([k,v]) => (
-                            <div key={k} className="flex justify-between items-center bg-white/10 px-2 py-1 rounded-lg">
-                               <span className="font-black text-xs">{k.split('_')[1]}</span>
-                               <span className="text-[8px] font-bold opacity-80 uppercase">{STEPS[v.status]?.label}</span>
-                            </div>
-                          ))}
-                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).length === 0 && <p className="text-[10px] italic opacity-60">ไม่มีห้องซ่อมค้าง</p>}
-                       </div>
-                    </div>
+      {/* 🟡 3. กำลังปรับปรุง (Repair) - คงเดิม (amber) */}
+      <div className="bg-amber-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-amber-700 lg:col-span-1">
+         <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Wrench size={14}/> กำลังปรับปรุง (Repair)</h4>
+         <div className="space-y-1.5">
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).map(([k,v]) => (
+              <div key={k} className="flex justify-between items-center bg-white/10 px-2 py-1.5 rounded-lg">
+                 <span className="font-black text-xs">{k.split('_')[1]}</span>
+                 <span className="text-[8px] font-bold opacity-80 uppercase bg-white text-amber-600 px-1.5 py-0.5 rounded-full">{STEPS[v.status]?.label}</span>
+              </div>
+            ))}
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).length === 0 && <p className="text-[10px] italic opacity-60">--- ไม่มีห้องซ่อมค้าง ---</p>}
+         </div>
+      </div>
 
-                    {/* 3. แจ้งย้ายออกแล้ว */}
-                    <div className="bg-rose-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-rose-700">
-                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Calendar size={14}/> แจ้งย้าย (Notice)</h4>
-                       <div className="space-y-1">
-                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'checkingOut' || v.status === 'keyReturn')).map(([k,v]) => (
-                            <p key={k} className="text-[10px] font-bold">• {k.split('_')[1]} (ออก: {v.checkoutDate || 'TBD'})</p>
-                          ))}
-                       </div>
-                    </div>
+      {/* 💖 4. กล่องนัดดูห้อง (หน้า Summary) */}
+<div className="bg-pink-500 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-pink-700">
+   <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Camera size={14}/> นัดดูห้อง</h4>
+   <div className="space-y-2">
+      {Object.entries(roomStates)
+        .filter(([k, v]) => v.propertyId === activePropertyId && v.status === 'appointment')
+        .map(([k, v]) => (
+           <div key={k} className="bg-white/10 p-2.5 rounded-2xl border border-white/5">
+              <div className="flex justify-between items-center mb-1">
+                 <span className="font-black text-sm text-white">{k.split('_')[1]}</span>
+                 {/* แสดงวันที่ */}
+                 <span className="text-[8px] font-black bg-white text-pink-600 px-2 py-0.5 rounded-lg italic">
+                   {v.tDate || 'TBD'}
+                 </span>
+              </div>
+              {/* --- แสดงเวลา (จุดที่นายถามหา) --- */}
+              <p className="text-[10px] font-black text-white">
+                ⏰ {v.appointmentTime || 'ไม่ระบุเวลา'}
+              </p>
+              <p className="text-[8px] font-bold text-pink-100 truncate opacity-60">👤 {v.tenantName || 'รอลงชื่อ'}</p>
+           </div>
+      ))}
+   </div>
+</div>
 
-                    {/* 4. นัดหมายวันนี้ */}
-                    <div className="bg-purple-600 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-purple-800">
-                       <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><Clock size={14}/> นัดย้ายเข้า/ดูห้อง</h4>
-                       <div className="space-y-1">
-                          {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).map(([k,v]) => (
-                            <p key={k} className="text-[10px] font-bold">• {k.split('_')[1]} ({v.appointmentTime || 'ไม่ระบุ'})</p>
-                          ))}
-                       </div>
-                    </div>
+      {/* 🟣 5. รอย้ายเข้า (Booked) - แยกใหม่ (purple) */}
+      <div className="bg-purple-600 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-purple-800 lg:col-span-1">
+         <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest flex items-center gap-2"><ShoppingBag size={14}/> รอย้ายเข้า (Booked)</h4>
+         <div className="space-y-1.5">
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'booked').map(([k,v]) => (
+               <div key={k} className="flex justify-between items-center bg-white/10 px-2 py-1.5 rounded-lg">
+                  <span className="font-black text-xs">{k.split('_')[1]}</span>
+                  <span className="text-[8px] font-bold opacity-80 uppercase bg-white text-purple-600 px-1.5 py-0.5 rounded-full">{v.tenantName} ({v.tDate || 'TBD'})</span>
+               </div>
+            ))}
+            {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'booked').length === 0 && (
+               <p className="text-[10px] italic opacity-60">--- ไม่มีคิวย้ายเข้า ---</p>
+            )}
+         </div>
+      </div>
 
-                  </div> {/* 👈 ปิด Grid 4 กล่องสี */}
+    </div> {/* 👈 ปิด Grid 5 กล่องสี */}
 
                   {/* 📋 ทะเบียนผู้เช่าปัจจุบัน (Active Tenants) */}
                   <div className="bg-white p-8 rounded-[3rem] border-2 shadow-sm overflow-hidden mt-6">
@@ -464,41 +491,82 @@ export default function App() {
                               </tr>
                            </thead>
                            <tbody className="text-[11px] font-bold text-slate-600">
+  {/* --------------------------------------------------------- */}
+  {/* 🔵 กลุ่มที่ 1: ผู้เช่าปัจจุบัน (เช่าอยู่จริง / กำลังย้ายออก) */}
+  {/* --------------------------------------------------------- */}
+  <tr className="bg-slate-50">
+    <td colSpan="5" className="py-2 px-4 text-[9px] text-slate-400 uppercase tracking-widest font-black">
+      ● ผู้เช่าปัจจุบัน (Active Residents)
+    </td>
+  </tr>
   {Object.entries(roomStates)
-    .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready')
-    .map(([k,v], index) => {
-      // 🎯 แก้ปัญหาเรื่องราคาและวันที่ให้แสดงผลได้จากทุกฟิลด์
-      const displayPrice = v.roomPrice || v.price || '0';
-      const displayDate = v.tDate || v.appointmentDate || v.checkinDate || '-';
-      
-      return (
-        <tr key={k} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-          <td className="py-5 font-black text-slate-300 text-[10px]">{index + 1}</td>
-          <td className="py-5 font-black text-slate-900 text-lg">{k.split('_')[1]}</td>
-          <td className="py-5">
-            <div className="font-black text-slate-800">{v.tenantName}</div>
-            <div className="text-[10px] text-slate-400 font-medium">{v.tenantPhone || '-'}</div>
-          </td>
-          <td className="py-5 font-mono text-slate-500 text-sm">{displayDate}</td>
-          <td className="py-5 text-right font-black text-emerald-600 text-sm">
-            {String(displayPrice).replace(/,/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ฿
-          </td>
-          <td className="py-5 text-center">
-            <button 
-              onClick={() => { setSelectedRoom(k.split('_')[1]); setViewMode('grid'); setShowLogbook(false); }}
-              className="p-3 bg-slate-100 text-slate-400 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
-            >
-              <Settings size={16} />
-            </button>
-          </td>
-        </tr>
-      );
-    })}
-  
-  {/* กรณีไม่มีข้อมูลผู้เช่า */}
+    .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && (v.status === 'rented' || v.status === 'checkingOut'))
+    .map(([k,v]) => (
+      <tr key={k} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+        <td className="py-4 font-black text-slate-900 text-lg pl-4">{k.split('_')[1]}</td>
+        <td className="py-4">
+          <div className="font-black text-slate-800">{v.tenantName}</div>
+          <div className="text-[9px] text-slate-400 font-bold">{v.tenantPhone || '-'}</div>
+        </td>
+        <td className="py-4 font-mono text-slate-500">{v.tDate || '-'}</td>
+        <td className="py-4 text-right font-black text-emerald-600">
+          {String(v.roomPrice || 0).replace(/,/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ฿
+        </td>
+        <td className="py-4 text-center">
+          <button onClick={() => { setSelectedRoom(k.split('_')[1]); setViewMode('grid'); }} className="p-3 bg-slate-100 text-slate-400 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+            <Settings size={16}/>
+          </button>
+        </td>
+      </tr>
+    ))}
+
+  {/* --------------------------------------------------------- */}
+  {/* 🔴 กลุ่มที่ 2: รายการนัดหมาย & จอง (Incoming) */}
+  {/* --------------------------------------------------------- */}
+  <tr className="bg-pink-50/50">
+    <td colSpan="5" className="py-2 px-4 text-[9px] text-pink-400 uppercase tracking-widest font-black">
+      ● รายการนัดหมาย & รอย้ายเข้า (Waitlist)
+    </td>
+  </tr>
+  {Object.entries(roomStates)
+    .filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && (v.status === 'booked' || v.status === 'appointment'))
+    .map(([k,v]) => (
+      <tr key={k} className="border-b border-pink-50 hover:bg-pink-50/30 transition-colors">
+        <td className="py-4 font-black text-pink-600 italic text-lg pl-4">{k.split('_')[1]}</td>
+        <td className="py-4">
+          <div className="font-black text-slate-800">
+            {v.tenantName} 
+            <span className={`ml-2 text-[8px] px-1.5 py-0.5 rounded ${v.status === 'booked' ? 'bg-purple-100 text-purple-600' : 'bg-pink-100 text-pink-500'}`}>
+              {v.status === 'booked' ? 'จองแล้ว' : 'นัดดูห้อง'}
+            </span>
+          </div>
+          <div className="text-[9px] text-slate-400 font-bold">{v.tenantPhone || '-'}</div>
+        </td>
+        <td className="py-4 font-mono text-pink-400 font-black">{v.tDate || v.appointmentDate || '-'}</td>
+        <td className="py-4 text-right font-black text-slate-400">
+          {v.status === 'booked' ? `${String(v.roomPrice || 0).replace(/,/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ฿` : 'รอสรุปราคา'}
+        </td>
+        <td className="py-4 text-center">
+          <button onClick={() => { setSelectedRoom(k.split('_')[1]); setViewMode('grid'); }} className="p-3 bg-pink-100 text-pink-400 rounded-2xl hover:bg-pink-500 hover:text-white transition-all shadow-sm">
+            <Settings size={16}/>
+          </button>
+        </td>
+      </tr>
+    ))}
+
+  {/* --------------------------------------------------------- */}
+  {/* 🎯 กรณีไม่มีข้อมูลเลย (ใส่กลับมาให้แล้วครับนาย!) */}
+  {/* --------------------------------------------------------- */}
   {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.tenantName && v.status !== 'ready').length === 0 && (
     <tr>
-      <td colSpan="6" className="py-20 text-center text-slate-300 italic text-xs">--- ไม่พบข้อมูลผู้เช่าในขณะนี้ ---</td>
+      <td colSpan="5" className="py-24 text-center">
+        <div className="flex flex-col items-center justify-center space-y-3 opacity-20">
+          <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center">
+            <Users size={30} className="text-slate-400" />
+          </div>
+          <p className="font-black text-slate-400 italic text-xs tracking-widest uppercase">--- ไม่พบข้อมูลผู้เช่าหรือนัดหมายในขณะนี้ ---</p>
+        </div>
+      </td>
     </tr>
   )}
 </tbody>
@@ -620,36 +688,52 @@ export default function App() {
                  </div>
               )}
 
-              {/* --- 💰 แจ้งเตือนภารกิจเซลล์ (Missions) ในหน้าผังห้อง --- */}
-              {userRole === 'sales' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 animate-in slide-in-from-top duration-500">
-                    <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
-                       <Key size={30} className="opacity-50" />
-                       <div>
-                          <h4 className="font-black text-[10px] uppercase tracking-widest">คืนกุญแจวันนี้</h4>
-                          <div className="flex flex-wrap gap-2 mt-1">
-                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').map(([k,v]) => (
-                               <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">ห้อง {k.split('_')[1]}</span>
-                             ))}
-                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัดคืนกุญแจ</span>}
-                          </div>
-                       </div>
-                    </div>
+              {/* --- 💰 แจ้งเตือนภารกิจเซลล์ (Missions) แยกส่วนชัดเจน --- */}
+{userRole === 'sales' && (
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      {/* 1. แจ้งเตือน: นัดดูห้อง (Appointment) - สีชมพู */}
+      <div className="bg-pink-500 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
+          <Camera size={30} className="opacity-50" />
+          <div>
+            <h4 className="font-black text-[10px] uppercase tracking-widest">นัดดูห้องวันนี้</h4>
+            <div className="flex flex-wrap gap-2 mt-1">
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'appointment').map(([k,v]) => (
+                  <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">{k.split('_')[1]}</span>
+                ))}
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'appointment').length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัด</span>}
+            </div>
+          </div>
+      </div>
 
-                    <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
-                       <ShoppingBag size={30} className="opacity-50" />
-                       <div>
-                          <h4 className="font-black text-[10px] uppercase tracking-widest">นัดย้ายเข้า/ดูห้อง</h4>
-                          <div className="flex flex-wrap gap-2 mt-1">
-                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).map(([k,v]) => (
-                               <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">ห้อง {k.split('_')[1]} ({v.appointmentTime || 'TBD'})</span>
-                             ))}
-                             {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && (v.status === 'booked' || v.status === 'appointment')).length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัดหมาย</span>}
-                          </div>
-                       </div>
-                    </div>
-                </div>
-              )}
+      {/* 2. แจ้งเตือน: รอย้ายเข้า (Booked) - สีม่วง */}
+      <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
+          <ShoppingBag size={30} className="opacity-50" />
+          <div>
+            <h4 className="font-black text-[10px] uppercase tracking-widest">รอย้ายเข้า/ทำสัญญา</h4>
+            <div className="flex flex-wrap gap-2 mt-1">
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'booked').map(([k,v]) => (
+                  <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">{k.split('_')[1]}</span>
+                ))}
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'booked').length === 0 && <span className="text-[10px] opacity-60">ไม่มีคิว</span>}
+            </div>
+          </div>
+      </div>
+
+      {/* 3. แจ้งเตือน: คืนกุญแจ (Key Return) - สีแดง */}
+      <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white shadow-lg flex items-center gap-4">
+          <Key size={30} className="opacity-50" />
+          <div>
+            <h4 className="font-black text-[10px] uppercase tracking-widest">คืนกุญแจวันนี้</h4>
+            <div className="flex flex-wrap gap-2 mt-1">
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').map(([k,v]) => (
+                  <span key={k} className="bg-white/20 px-2 py-1 rounded-lg text-xs font-black">ห้อง {k.split('_')[1]}</span>
+                ))}
+                {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'keyReturn').length === 0 && <span className="text-[10px] opacity-60">ไม่มีนัด</span>}
+            </div>
+          </div>
+      </div>
+  </div>
+)}
 
               {activeProperty?.floors.map(floor => (
                 <div key={floor.level} className="space-y-4 font-sans">
@@ -730,67 +814,72 @@ export default function App() {
                 /* 🔥 SOP WORKFLOW ENGINE (กางออกครบทุกสเต็ป) */
                 <form id="modalForm" className="space-y-6 font-sans">
                    {(() => {
-                      const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'rented' };
-                      const cur = info.status;
-                      // 📌 1. สถานะ: นัดดูห้อง (Appointment)
+  const info = roomStates[`${activePropertyId}_${selectedRoom}`] || { status: 'ready' };
+  const cur = info.status;
+
+  // 📌 สถานะ: นัดดูห้อง (Appointment)
 if (cur === 'appointment') return (
-  <div className="space-y-6 font-sans">
+  <div className="space-y-6">
     <div className="bg-pink-50 p-8 rounded-[2.5rem] border-2 border-pink-100 shadow-inner space-y-4">
-      <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest pl-2">บันทึกการนัดหมายดูห้อง</p>
+      <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest pl-2 font-sans">ลงทะเบียนนัดดูห้อง</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อลูกค้า</p>
-          <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="ชื่อลูกค้า" />
+          <p className="text-[9px] font-bold text-slate-400 pl-2 font-sans">ชื่อลูกค้า</p>
+          <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm outline-none" placeholder="ชื่อลูกค้า" />
         </div>
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
-          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" placeholder="เบอร์โทร" />
+          <p className="text-[9px] font-bold text-slate-400 pl-2 font-sans">เบอร์ติดต่อ</p>
+          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm outline-none" placeholder="เบอร์โทร" />
         </div>
-        <div className="space-y-1 md:col-span-2">
-          <p className="text-[9px] font-bold text-rose-500 pl-2">วันที่นัด (โชว์ที่หน้า Summary)</p>
-          <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="เช่น 15/04/2569" />
+        {/* แก้ตรงนี้: แบ่งจาก 1 คอลัมน์ยาว เป็น 2 ช่องคู่กัน */}
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-rose-500 pl-2 font-sans">วันที่นัดหมาย</p>
+          <input name="tDate" defaultValue={info.tDate || info.appointmentDate} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="15/04/2569" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold text-rose-500 pl-2 font-sans">เวลานัดหมาย</p>
+          <input name="appointmentTime" defaultValue={info.appointmentTime} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="14:30" />
         </div>
       </div>
+      <button type="button" onClick={() => handleUpdateRoom('appointment')} className="w-full py-3 bg-white border-2 border-pink-200 text-pink-500 rounded-xl font-bold text-xs hover:bg-pink-500 hover:text-white transition-all">
+        อัปเดตข้อมูลนัดหมาย (บันทึกไว้ดูในหน้าสรุป)
+      </button>
     </div>
-    {/* 🎯 ปุ่มกด: กลับมาวนตามลูป STEPS[cur].next แล้วครับนาย! */}
-    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-pink-500 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl transition-all active:scale-95">
-       ยืนยันการนัด → {STEPS[STEPS[cur].next]?.label}
-    </button>
+
+    <div className="grid grid-cols-2 gap-4">
+      {/* ❌ ถ้าไม่สนใจ: กดแล้วข้อมูลจะถูกล้างและกลับไป 'Ready' */}
+      <button type="button" onClick={() => handleUpdateRoom('ready')} className="bg-slate-200 text-slate-500 py-8 rounded-[2rem] font-black text-lg uppercase shadow-md active:scale-95">ไม่สนใจ / ยกเลิก</button>
+      
+      {/* ✅ ถ้าเอา: กดแล้วจะพาไปหน้า 'Booked' เพื่อกรอกเงินประกันต่อ */}
+      <button type="button" onClick={() => handleUpdateRoom('booked')} className="bg-pink-500 text-white py-8 rounded-[2rem] font-black text-lg uppercase shadow-xl active:scale-95">ตกลงเช่า → ไปหน้าจอง</button>
+    </div>
   </div>
 );
 
-// 📌 2. สถานะ: รอย้ายเข้า (Booked)
+// 📌 สถานะ: รอย้ายเข้า (Booked)
 if (cur === 'booked') return (
-  <div className="space-y-6 font-sans">
+  <div className="space-y-6">
     <div className="bg-purple-50 p-8 rounded-[2.5rem] border-2 border-purple-100 shadow-inner space-y-5">
-      <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest pl-2">ข้อมูลการจองและค่าประกัน</p>
+      <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest pl-2 font-sans">ข้อมูลการจองและค่าประกัน</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ... ชื่อ, เบอร์, ราคา, เงินประกัน คงเดิม ... */}
+        <div className="space-y-1"><p className="text-[9px] font-bold text-slate-400 pl-2 font-sans">ชื่อผู้เช่า</p><input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm outline-none" /></div>
+        <div className="space-y-1"><p className="text-[9px] font-bold text-slate-400 pl-2 font-sans">เบอร์ติดต่อ</p><input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm outline-none" /></div>
+        <div className="space-y-1"><p className="text-[9px] font-bold text-slate-400 pl-2 font-sans">ราคาค่าห้อง/เดือน</p><input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600 outline-none" /></div>
+        <div className="space-y-1"><p className="text-[9px] font-bold text-rose-500 pl-2 font-sans uppercase">เงินประกัน</p><input name="insurance" defaultValue={info.insurance || ""} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" /></div>
+        
+        {/* แก้ตรงนี้: แยกวันที่กับเวลาเป็น 2 ช่องคู่กัน */}
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">ชื่อผู้เช่า</p>
-          <input name="tName" defaultValue={info.tenantName} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
+          <p className="text-[9px] font-bold text-purple-600 pl-2 font-sans">วันที่ย้ายเข้าจริง</p>
+          <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600 outline-none" placeholder="15/04/2569" />
         </div>
         <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">เบอร์ติดต่อ</p>
-          <input name="tPhone" defaultValue={info.tenantPhone} className="w-full p-4 bg-white border-2 rounded-2xl font-bold text-sm" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-[9px] font-bold text-slate-400 pl-2">ราคาค่าห้อง/เดือน</p>
-          <input name="roomPrice" defaultValue={info.roomPrice} className="w-full p-4 bg-white border-2 rounded-2xl font-black text-sm text-indigo-600" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-[9px] font-bold text-rose-500 pl-2 uppercase">เงินประกัน (Insurance)</p>
-          <input name="insurance" defaultValue={info.insurance || ""} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="ระบุเงินประกัน" />
-        </div>
-        <div className="space-y-1 md:col-span-2">
-          <p className="text-[9px] font-bold text-purple-600 pl-2">วันที่ย้ายเข้า</p>
-          <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600" placeholder="เช่น 15/04/2569" />
+          <p className="text-[9px] font-bold text-purple-600 pl-2 font-sans">เวลานัดหมาย</p>
+          <input name="appointmentTime" defaultValue={info.appointmentTime} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600 outline-none" placeholder="09:00" />
         </div>
       </div>
     </div>
-    {/* 🎯 ปุ่มกด: วนเข้าสเต็ป 'rented' ตามคิวของนายเป๊ะ! */}
-    <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800">
-       ยืนยันทำสัญญา → {STEPS[STEPS[cur].next]?.label}
-    </button>
+    <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800 active:scale-95 transition-all">ยืนยันทำสัญญา → เช่าอยู่จริง</button>
   </div>
 );
 
