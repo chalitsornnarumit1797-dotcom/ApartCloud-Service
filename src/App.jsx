@@ -589,19 +589,42 @@ export default function App() {
                               </tr>
                            </thead>
                            <tbody className="text-[11px] font-bold text-slate-600">
-                              {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.repairData).map(([k,v]) => {
-                                 const totalDamaged = Object.values(v.repairData).reduce((sum, item) => sum + Number(item.price || 0), 0);
-                                 return (
-                                    <tr key={k} className="border-b border-slate-50">
-                                       <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
-                                       <td className="py-4">{v.tenantName || '-'}</td>
-                                       <td className="py-4">{Number(v.insurance || 0).toLocaleString()} ฿</td>
-                                       <td className="py-4 text-rose-500">-{totalDamaged.toLocaleString()} ฿</td>
-                                       <td className="py-4 text-emerald-600 font-black">{(Number(v.insurance || 0) - totalDamaged).toLocaleString()} ฿</td>
-                                    </tr>
-                                 )
-                              })}
-                           </tbody>
+  {Object.entries(roomStates)
+    .filter(([k, v]) => v.propertyId === activePropertyId && v.repairData)
+    .map(([k, v]) => {
+      // 🎯 1. ดึงเงินประกันออกมา และล้างคอมม่าทิ้งก่อนแปลงเป็นตัวเลข
+      const insurance = Number(String(v.insurance || 0).replace(/,/g, ''));
+
+      // 🎯 2. รวมค่าเสียหาย และล้างคอมม่าทิ้งก่อนบวกเลข
+      const totalDamaged = Object.values(v.repairData).reduce((sum, item) => {
+        const price = Number(String(item.price || 0).replace(/,/g, ''));
+        return sum + price;
+      }, 0);
+
+      // 🎯 3. คำนวณยอดคืน (ประกัน - เสียหาย)
+      const finalRefund = insurance - totalDamaged;
+
+      return (
+        <tr key={k} className="border-b border-slate-50">
+          <td className="py-4 font-black text-slate-900">{k.split('_')[1]}</td>
+          <td className="py-4">{v.tenantName || '-'}</td>
+          
+          {/* แสดงผลเงินประกันแบบใส่คอมม่ากลับเข้าไปให้สวยๆ */}
+          <td className="py-4 text-slate-500">
+            {insurance.toLocaleString()} ฿
+          </td>
+          
+          <td className="py-4 text-rose-500">
+            -{totalDamaged.toLocaleString()} ฿
+          </td>
+          
+          <td className="py-4 text-emerald-600 font-black text-sm">
+            {finalRefund.toLocaleString()} ฿
+          </td>
+        </tr>
+      );
+    })}
+</tbody>
                         </table>
                      </div>
                   </div>
