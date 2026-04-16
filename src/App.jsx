@@ -299,6 +299,12 @@ export default function App() {
         <div className="flex bg-slate-100 p-1 rounded-2xl gap-1">
            <button onClick={()=>setViewMode('grid')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='grid'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>ผังห้อง</button>
            <button onClick={()=>setViewMode('summary')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='summary'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Summary</button>
+           <button 
+  onClick={() => setViewMode('partnerReport')} 
+  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'partnerReport' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'text-slate-400 hover:bg-slate-200'}`}
+>
+  <Monitor size={14} className="inline mr-1 mb-0.5"/> Partner Report
+</button>
            {userRole === 'engineer' && (
              <>
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
@@ -631,6 +637,104 @@ export default function App() {
                 </div>
               )}
             </div>
+            ) : viewMode === 'partnerReport' ? (
+          /* --- 📊 [NEW] MEGA SUMMARY FOR PARTNERS --- */
+          <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500 font-sans pb-10">
+            <div className="text-center space-y-2 py-6">
+              <h2 className="text-5xl font-black italic text-slate-900 uppercase tracking-tighter">Portfolio Executive Report</h2>
+              <p className="text-slate-400 font-bold text-xs uppercase tracking-widest bg-slate-100 inline-block px-4 py-1 rounded-full border">
+                Update: {new Date().toLocaleDateString('th-TH')} | {new Date().toLocaleTimeString('th-TH')}
+              </p>
+            </div>
+
+            {/* 💎 กล่องสรุปภาพรวมทั้งพอร์ต (Grand Total) */}
+<div className="bg-slate-900 p-10 rounded-[4rem] shadow-2xl text-white mb-10 border-b-[12px] border-indigo-600">
+  <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-50 mb-4 text-center">Portfolio Grand Total (ทุกโครงการ)</p>
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+     <div className="text-center">
+        <p className="text-[9px] font-bold opacity-40 uppercase">ห้องว่างทั้งหมด</p>
+        <p className="text-4xl font-black text-emerald-400">
+          {Object.values(roomStates).filter(v => v.status === 'ready').length}
+        </p>
+     </div>
+     <div className="text-center border-l border-white/10">
+        <p className="text-[9px] font-bold opacity-40 uppercase">นัดดู/จองรวม</p>
+        <p className="text-4xl font-black text-pink-400">
+          {Object.values(roomStates).filter(v => v.status === 'appointment' || v.status === 'booked').length}
+        </p>
+     </div>
+     <div className="text-center border-l border-white/10">
+        <p className="text-[9px] font-bold opacity-40 uppercase">แจ้งย้ายรวม</p>
+        <p className="text-4xl font-black text-rose-400">
+          {Object.values(roomStates).filter(v => v.status === 'checkingOut').length}
+        </p>
+     </div>
+     <div className="text-center border-l border-white/10">
+        <p className="text-[9px] font-bold opacity-40 uppercase">อยู่จริงทั้งหมด</p>
+        <p className="text-4xl font-black text-indigo-400">
+          {Object.values(roomStates).filter(v => v.status === 'rented').length}
+        </p>
+     </div>
+  </div>
+</div>
+
+            <div className="grid grid-cols-1 gap-8">
+              {PROPERTIES.map(prop => {
+                const rooms = Object.values(roomStates).filter(v => v.propertyId === prop.id);
+                const ready = rooms.filter(v => v.status === 'ready').length;
+                const appt = rooms.filter(v => v.status === 'appointment').length;
+                const booked = rooms.filter(v => v.status === 'booked').length;
+                const notice = rooms.filter(v => v.status === 'checkingOut' || v.status === 'keyReturn').length;
+                const repair = rooms.filter(v => ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).length;
+
+                return (
+                  <div key={prop.id} className="bg-white p-10 rounded-[4rem] shadow-2xl border-2 border-slate-50 relative overflow-hidden group hover:border-indigo-100 transition-all">
+                    <div className="flex justify-between items-end mb-8">
+                       <div>
+                         <h3 className="text-3xl font-black text-slate-800 italic leading-none">{prop.name}</h3>
+                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2 ml-1">Overall Status Summary</p>
+                       </div>
+                       <div className="text-right">
+                         <p className="text-[10px] font-black text-slate-300 uppercase">Total Rooms</p>
+                         <p className="text-2xl font-black text-slate-400">{prop.floors.reduce((acc, f) => acc + f.rooms.length, 0)}</p>
+                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      {/* กล่องสีต่างๆ */}
+                      <div className="bg-emerald-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-emerald-700">
+                        <Tag size={20} className="mx-auto mb-2 opacity-40"/>
+                        <p className="text-[9px] font-black uppercase opacity-80">พร้อมขาย</p>
+                        <p className="text-3xl font-black">{ready}</p>
+                      </div>
+                      <div className="bg-pink-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-pink-700">
+                        <Camera size={20} className="mx-auto mb-2 opacity-40"/>
+                        <p className="text-[9px] font-black uppercase opacity-80">นัดดูห้อง</p>
+                        <p className="text-3xl font-black">{appt}</p>
+                      </div>
+                      <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-purple-800">
+                        <ShoppingBag size={20} className="mx-auto mb-2 opacity-40"/>
+                        <p className="text-[9px] font-black uppercase opacity-80">รอย้ายเข้า</p>
+                        <p className="text-3xl font-black">{booked}</p>
+                      </div>
+                      <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-rose-700">
+                        <Calendar size={20} className="mx-auto mb-2 opacity-40"/>
+                        <p className="text-[9px] font-black uppercase opacity-80">แจ้งย้าย</p>
+                        <p className="text-3xl font-black">{notice}</p>
+                      </div>
+                      <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-amber-700">
+                        <Wrench size={20} className="mx-auto mb-2 opacity-40"/>
+                        <p className="text-[9px] font-black uppercase opacity-80">ปรับปรุง</p>
+                        <p className="text-3xl font-black">{repair}</p>
+                      </div>
+                    </div>
+                    {/* ลายน้ำจางๆ หลังตึก */}
+                    <Building2 size={120} className="absolute -right-10 -top-10 opacity-[0.03] -rotate-12 pointer-events-none"/>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         ) : viewMode === 'airPlanner' ? (
            /* --- 🌪️ ตารางแผนแอร์ --- */
            <div className="bg-white rounded-[3rem] border shadow-2xl overflow-hidden font-sans">
