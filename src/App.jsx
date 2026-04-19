@@ -118,6 +118,25 @@ const CHECKLIST_QC = {
 
 const WM_CHECKLIST = ["ถังซักสะอาด", "หยอดเหรียญปกติ", "ท่อน้ำปกติ", "เสียงเครื่องปกติ", "ปั่นแห้งปกติ", "ฝาปิดปกติ"];
 
+const MAINTENANCE_ACCESS_LABEL = {
+  allow: 'อนุญาตให้เข้า',
+  knock: 'เคาะประตูก่อน',
+  deny: 'ไม่อนุญาต'
+};
+
+function maintenanceDateYmd(value) {
+  if (value == null || value === '') return '';
+  if (typeof value.toDate === 'function') {
+    try {
+      return value.toDate().toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  }
+  if (typeof value === 'string') return value.slice(0, 10);
+  return '';
+}
+
 const PROPERTIES = [
   { id: 'mangmee', name: 'บ้านมั่งมีทวีสุข', floors: [7,6,5,4,3,2].map(l => ({ level: l, rooms: Array.from({ length: 18 }, (_, i) => `${l}${String(i + 1).padStart(2, '0')}`) })) },
   { id: 'mytree', name: 'บ้านมายทรี 48', floors: [5,4,3,2,1].map(l => ({ level: l, rooms: l===1 ? Array.from({length:11},(_,i)=>`1${String(i+1).padStart(2,'0')}`) : ['01','02','03','05','06','07','08','09','10','11','12','13','14','15'].map(r => `${l}${r}`) })) },
@@ -141,6 +160,17 @@ export default function App() {
   const [repairs, setRepairs] = useState({});
   const [qcChecks, setQcChecks] = useState({});
   const [logHistory, setLogHistory] = useState([]);
+  const [maintenanceLogs, setMaintenanceLogs] = useState([]);
+  const [repairLogModal, setRepairLogModal] = useState(null); // null | 'air' | 'wm'
+  const [repairLogForm, setRepairLogForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    roomOrBuilding: '',
+    details: '',
+    access: 'allow',
+    actualCost: '',
+    customerCharge: '',
+    newEquipmentPrice: ''
+  });
 
   useEffect(() => {
     signInAnonymously(auth).then(() => {
@@ -160,6 +190,11 @@ export default function App() {
         const data = {}; snap.forEach(d => { data[d.id] = d.data(); });
         setRoomSpecs(data);
       });
+      onSnapshot(collection(db, 'apartments', appId, 'maintenance_logs'), (snap) => {
+        const rows = [];
+        snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+        setMaintenanceLogs(rows);
+      });
     });
   }, []);
 
@@ -177,14 +212,106 @@ export default function App() {
     const list = { repair: [], air: [], wm: false };
     const today = new Date().toISOString().split('T')[0];
     Object.entries(roomStates).forEach(([k, v]) => {
-      if (v.propertyId === activePropertyId && v.status === 'maintenance') list.repair.push(k.split('_')[1]);
+      if (v.propertyId === activePropertyId && v.status === 'maintenance') {
+        list.repair.push({ key: `room-${k}`, label: k.split('_')[1] });
+      }
+    });
+    maintenanceLogs.forEach((log) => {
+      if (log.propertyId !== activePropertyId) return;
+      const logDate = maintenanceDateYmd(log.date);
+      if (logDate !== today) return;
+      const tag = log.category === 'air' ? 'แอร์' : 'ซักผ้า';
+      list.repair.push({
+        key: `log-${log.id}`,
+        label: `${log.roomOrBuilding || '-'} (${tag})`
+      });
     });
     Object.entries(airPlans).forEach(([k, v]) => {
       if (k.startsWith(activePropertyId) && v.date === today && !v.done) list.air.push(k.split('_')[1]);
     });
     if (wmPlans[`${activePropertyId}_COMMON`] && !wmPlans[`${activePropertyId}_COMMON`].done) list.wm = true;
     return list;
-  }, [roomStates, airPlans, wmPlans, activePropertyId]);
+  }, [roomStates, airPlans, wmPlans, activePropertyId, maintenanceLogs]);
+
+  const maintenanceTotals = useMemo(() => {
+    const logs = maintenanceLogs.filter((l) => l.propertyId === activePropertyId);
+    const totalCost = logs.reduce((s, l) => s + (Number(l.actualCost) || 0), 0);
+    const totalCharge = logs.reduce((s, l) => s + (Number(l.customerCharge) || 0), 0);
+    return { totalCost, totalCharge, profit: totalCharge - totalCost };
+  }, [maintenanceLogs, activePropertyId]);
+
+  const propertyMaintenanceLogsSorted = useMemo(() => {
+    return maintenanceLogs
+      .filter((l) => l.propertyId === activePropertyId)
+      .slice()
+      .sort((a, b) => {
+        const da = maintenanceDateYmd(a.date);
+        const db = maintenanceDateYmd(b.date);
+        if (da !== db) return db.localeCompare(da);
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+  }, [maintenanceLogs, activePropertyId]);
+
+  /** ทุนสะสมจริงถึงรายการนั้น ต่อคู่ (หมวด + ห้อง/ตึก) เรียงจากเก่าไปใหม่ — ใช้เทียบราคาเครื่องใหม่ */
+  const maintenanceCumulativeByLogId = useMemo(() => {
+    const asc = maintenanceLogs
+      .filter((l) => l.propertyId === activePropertyId)
+      .slice()
+      .sort((a, b) => {
+        const da = maintenanceDateYmd(a.date);
+        const db = maintenanceDateYmd(b.date);
+        if (da !== db) return da.localeCompare(db);
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      });
+    const running = new Map();
+    const byLogId = new Map();
+    for (const log of asc) {
+      const assetKey = `${log.category || ''}|${(log.roomOrBuilding || '').trim()}`;
+      const prev = running.get(assetKey) || 0;
+      const next = prev + (Number(log.actualCost) || 0);
+      running.set(assetKey, next);
+      byLogId.set(log.id, next);
+    }
+    return byLogId;
+  }, [maintenanceLogs, activePropertyId]);
+
+  const openRepairLogModal = (category) => {
+    setRepairLogForm({
+      date: new Date().toISOString().split('T')[0],
+      roomOrBuilding: '',
+      details: '',
+      access: 'allow',
+      actualCost: '',
+      customerCharge: '',
+      newEquipmentPrice: ''
+    });
+    setRepairLogModal(category);
+  };
+
+  const submitMaintenanceLog = async () => {
+    if (!repairLogModal) return;
+    const actual = Number(String(repairLogForm.actualCost || 0).replace(/,/g, '')) || 0;
+    const charge = Number(String(repairLogForm.customerCharge || 0).replace(/,/g, '')) || 0;
+    const newPrice = Number(String(repairLogForm.newEquipmentPrice || 0).replace(/,/g, '')) || 0;
+    if (!repairLogForm.roomOrBuilding.trim()) {
+      alert('กรุณาระบุเลขห้อง/ตึก');
+      return;
+    }
+    await addDoc(collection(db, 'apartments', appId, 'maintenance_logs'), {
+      propertyId: activePropertyId,
+      category: repairLogModal,
+      date: repairLogForm.date,
+      roomOrBuilding: repairLogForm.roomOrBuilding.trim(),
+      details: repairLogForm.details.trim(),
+      access: repairLogForm.access,
+      actualCost: actual,
+      customerCharge: charge,
+      newEquipmentPrice: newPrice,
+      createdAt: new Date().toISOString(),
+      createdBy: userRole === 'sales' ? 'sales' : 'engineer'
+    });
+    setRepairLogModal(null);
+  };
 
   const handleUpdateRoom = async (nextStep) => {
     const docId = `${activePropertyId}_${selectedRoom}`;
@@ -307,6 +434,7 @@ export default function App() {
 </button>
            {userRole === 'engineer' && (
              <>
+               <button onClick={()=>setViewMode('repairLog')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='repairLog'?'bg-amber-600 text-white shadow-sm':'text-slate-400'}`}>บันทึกซ่อม</button>
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
              </>
@@ -735,6 +863,106 @@ export default function App() {
               })}
             </div>
           </div>
+        ) : viewMode === 'repairLog' ? (
+           <div className="space-y-8 animate-in fade-in font-sans max-w-6xl mx-auto pb-10">
+              <div className="bg-gradient-to-br from-amber-600 to-orange-700 p-10 rounded-[3rem] text-white shadow-2xl">
+                 <h2 className="text-2xl md:text-3xl font-black italic uppercase flex items-center gap-3"><ClipboardCheck size={32}/> บันทึกการซ่อม · {activeProperty.name}</h2>
+                 <p className="text-[10px] font-bold opacity-80 mt-2">สรุปตามโครงการที่เลือก — ซิงค์แบบ Real-time จาก Firebase</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl border-b-8 border-slate-700">
+                    <p className="text-[10px] font-black uppercase opacity-50 tracking-widest mb-2">ต้นทุนรวม (ซ่อมจริง)</p>
+                    <p className="text-3xl font-black">{maintenanceTotals.totalCost.toLocaleString()} ฿</p>
+                 </div>
+                 <div className="bg-indigo-600 text-white p-8 rounded-[2.5rem] shadow-xl border-b-8 border-indigo-800">
+                    <p className="text-[10px] font-black uppercase opacity-50 tracking-widest mb-2">ยอดเรียกเก็บลูกค้า</p>
+                    <p className="text-3xl font-black">{maintenanceTotals.totalCharge.toLocaleString()} ฿</p>
+                 </div>
+                 <div className={`p-8 rounded-[2.5rem] shadow-xl border-b-8 ${maintenanceTotals.profit >= 0 ? 'bg-emerald-500 text-white border-emerald-700' : 'bg-rose-500 text-white border-rose-700'}`}>
+                    <p className="text-[10px] font-black uppercase opacity-70 tracking-widest mb-2">กำไรส่วนต่างสะสม</p>
+                    <p className="text-3xl font-black">{maintenanceTotals.profit.toLocaleString()} ฿</p>
+                    <p className="text-[9px] font-bold mt-2 opacity-80">เรียกเก็บ − ต้นทุนจริง</p>
+                 </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                 <button type="button" onClick={() => openRepairLogModal('air')} className="flex-1 min-w-[200px] bg-sky-500 hover:bg-sky-600 text-white py-6 rounded-[2rem] font-black text-sm uppercase shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                    <Wind size={22}/> บันทึกซ่อมแอร์
+                 </button>
+                 <button type="button" onClick={() => openRepairLogModal('wm')} className="flex-1 min-w-[200px] bg-indigo-600 hover:bg-indigo-700 text-white py-6 rounded-[2rem] font-black text-sm uppercase shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                    <WashingMachine size={22}/> บันทึกซ่อมเครื่องซักผ้า
+                 </button>
+              </div>
+
+              {['air', 'wm'].map((cat) => {
+                 const rows = propertyMaintenanceLogsSorted.filter((l) => l.category === cat);
+                 if (rows.length === 0) return null;
+                 const title = cat === 'air' ? 'ประวัติซ่อมแอร์' : 'ประวัติซ่อมเครื่องซักผ้า';
+                 const headClass = cat === 'air' ? 'bg-sky-500' : 'bg-indigo-600';
+                 return (
+                    <div key={cat} className="bg-white rounded-[2.5rem] border-2 border-slate-100 shadow-xl overflow-hidden">
+                       <div className={`${headClass} text-white px-8 py-4 font-black text-xs uppercase tracking-widest`}>{title}</div>
+                       <div className="overflow-x-auto">
+                          <table className="w-full text-left text-[11px]">
+                             <thead className="bg-slate-50 text-slate-500 font-black uppercase border-b">
+                                <tr>
+                                   <th className="p-4">วันที่</th>
+                                   <th className="p-4">ห้อง/ตึก</th>
+                                   <th className="p-4">รายละเอียด</th>
+                                   <th className="p-4">เข้าห้อง</th>
+                                   <th className="p-4 text-right">ทุนจริง</th>
+                                   <th className="p-4 text-right">หักลูกค้า</th>
+                                   <th className="p-4 text-right">ราคาเครื่องใหม่ (เทียบ)</th>
+                                   <th className="p-4">ซ่อมสะสม vs ซื้อใหม่</th>
+                                </tr>
+                             </thead>
+                             <tbody>
+                                {rows.map((log) => {
+                                   const cumulative = maintenanceCumulativeByLogId.get(log.id) ?? 0;
+                                   const bench = Number(log.newEquipmentPrice) || 0;
+                                   let worthMsg = '—';
+                                   let worthClass = 'text-slate-400';
+                                   if (bench > 0) {
+                                      if (cumulative <= bench) {
+                                         worthMsg = 'ซ่อมสะสมคุ้มกว่าซื้อใหม่ (ทุนสะสมยังไม่เกินราคาเครื่องใหม่)';
+                                         worthClass = 'text-emerald-600 font-bold';
+                                      } else {
+                                         worthMsg = 'ทุนสะสมเกินราคาเครื่องใหม่ — พิจารณาซื้อใหม่';
+                                         worthClass = 'text-rose-600 font-bold';
+                                      }
+                                   } else {
+                                      worthMsg = 'ยังไม่ระบุราคาเครื่องใหม่สำหรับเทียบ';
+                                   }
+                                   return (
+                                      <tr key={log.id} className="border-b border-slate-50 align-top hover:bg-slate-50/80">
+                                         <td className="p-4 font-black whitespace-nowrap">{maintenanceDateYmd(log.date) || '—'}</td>
+                                         <td className="p-4 font-black">{log.roomOrBuilding || '-'}</td>
+                                         <td className="p-4 max-w-[200px] text-slate-600">{log.details || '—'}</td>
+                                         <td className="p-4">{MAINTENANCE_ACCESS_LABEL[log.access] || log.access || '—'}</td>
+                                         <td className="p-4 text-right font-black text-slate-800">{(Number(log.actualCost) || 0).toLocaleString()}</td>
+                                         <td className="p-4 text-right font-black text-indigo-600">{(Number(log.customerCharge) || 0).toLocaleString()}</td>
+                                         <td className="p-4 text-right font-black text-amber-600">{bench ? bench.toLocaleString() : '—'}</td>
+                                         <td className="p-4">
+                                            <p className={worthClass}>{worthMsg}</p>
+                                            <p className="text-[9px] text-slate-400 mt-1">ทุนสะสมถึงรายการนี้: {cumulative.toLocaleString()} ฿</p>
+                                         </td>
+                                      </tr>
+                                   );
+                                })}
+                             </tbody>
+                          </table>
+                       </div>
+                    </div>
+                 );
+              })}
+
+              {propertyMaintenanceLogsSorted.length === 0 && (
+                 <div className="text-center py-16 bg-slate-100 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-slate-400 font-bold text-sm">
+                    ยังไม่มีประวัติบันทึกซ่อมในโครงการนี้
+                 </div>
+              )}
+           </div>
         ) : viewMode === 'airPlanner' ? (
            /* --- 🌪️ ตารางแผนแอร์ --- */
            <div className="bg-white rounded-[3rem] border shadow-2xl overflow-hidden font-sans">
@@ -801,7 +1029,9 @@ export default function App() {
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans font-sans font-sans">
                     <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white shadow-lg space-y-2">
                        <h4 className="font-black text-[10px] flex items-center gap-2 uppercase tracking-widest font-sans font-sans font-sans font-sans"><Hammer size={16}/> ภารกิจซ่อมวันนี้</h4>
-                       {missions.repair.map(m => <div key={m} className="bg-white/20 p-2 rounded-xl font-black italic text-sm font-sans">ห้อง {m}</div>)}
+                       {missions.repair.map((m) => (
+                         <div key={m.key} className="bg-white/20 p-2 rounded-xl font-black italic text-sm font-sans">ห้อง {m.label}</div>
+                       ))}
                        {missions.repair.length===0 && <p className="text-[10px] italic opacity-60 font-sans">ไม่มีงานซ่อม</p>}
                     </div>
                     <div className="bg-sky-500 p-6 rounded-[2.5rem] text-white shadow-lg space-y-2">
@@ -1307,6 +1537,64 @@ if (cur === 'inspection') {
                    })()}
                 </form>
               )}
+           </div>
+        </div>
+      )}
+
+      {repairLogModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4 font-sans">
+           <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-start gap-4">
+                 <div>
+                    <h3 className="text-xl font-black text-slate-900">
+                       {repairLogModal === 'air' ? 'บันทึกซ่อมแอร์' : 'บันทึกซ่อมเครื่องซักผ้า'}
+                    </h3>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{activeProperty.name}</p>
+                 </div>
+                 <button type="button" onClick={() => setRepairLogModal(null)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 shrink-0"><X size={22}/></button>
+              </div>
+
+              <div className="space-y-4">
+                 <label className="block space-y-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">วันที่</span>
+                    <input type="date" value={repairLogForm.date} onChange={(e) => setRepairLogForm({ ...repairLogForm, date: e.target.value })} className="w-full p-3 bg-slate-50 rounded-xl font-black text-sm outline-none border-2 border-transparent focus:border-indigo-200" />
+                 </label>
+                 <label className="block space-y-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">เลขห้อง / ตึก</span>
+                    <input value={repairLogForm.roomOrBuilding} onChange={(e) => setRepairLogForm({ ...repairLogForm, roomOrBuilding: e.target.value })} className="w-full p-3 bg-slate-50 rounded-xl font-black text-sm outline-none border-2 border-transparent focus:border-indigo-200" placeholder="เช่น 501 หรือ ตึก A" />
+                 </label>
+                 <label className="block space-y-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">รายละเอียดงาน</span>
+                    <textarea value={repairLogForm.details} onChange={(e) => setRepairLogForm({ ...repairLogForm, details: e.target.value })} rows={3} className="w-full p-3 bg-slate-50 rounded-xl font-bold text-xs outline-none border-2 border-transparent focus:border-indigo-200" placeholder="อาการ / อะไหล่ / หมายเหตุ" />
+                 </label>
+                 <label className="block space-y-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase">การเข้าห้อง</span>
+                    <select value={repairLogForm.access} onChange={(e) => setRepairLogForm({ ...repairLogForm, access: e.target.value })} className="w-full p-3 bg-slate-50 rounded-xl font-black text-xs outline-none border-2 border-transparent focus:border-indigo-200">
+                       <option value="allow">อนุญาตให้เข้า</option>
+                       <option value="knock">เคาะประตูก่อน</option>
+                       <option value="deny">ไม่อนุญาต</option>
+                    </select>
+                 </label>
+                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="block space-y-1">
+                       <span className="text-[9px] font-black text-slate-400 uppercase">ทุนซ่อมจริง (฿)</span>
+                       <input type="number" min="0" value={repairLogForm.actualCost} onChange={(e) => setRepairLogForm({ ...repairLogForm, actualCost: e.target.value })} className="w-full p-3 bg-slate-50 rounded-xl font-black text-sm outline-none" />
+                    </label>
+                    <label className="block space-y-1">
+                       <span className="text-[9px] font-black text-slate-400 uppercase">หักลูกค้า (฿)</span>
+                       <input type="number" min="0" value={repairLogForm.customerCharge} onChange={(e) => setRepairLogForm({ ...repairLogForm, customerCharge: e.target.value })} className="w-full p-3 bg-slate-50 rounded-xl font-black text-sm outline-none" />
+                    </label>
+                    <label className="block space-y-1">
+                       <span className="text-[9px] font-black text-amber-600 uppercase">ราคาเครื่องใหม่ (฿)</span>
+                       <input type="number" min="0" value={repairLogForm.newEquipmentPrice} onChange={(e) => setRepairLogForm({ ...repairLogForm, newEquipmentPrice: e.target.value })} className="w-full p-3 bg-amber-50 rounded-xl font-black text-sm outline-none border-2 border-amber-100" placeholder="เทียบความคุ้มค่า" />
+                    </label>
+                 </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                 <button type="button" onClick={() => setRepairLogModal(null)} className="flex-1 py-4 rounded-2xl font-black text-xs uppercase bg-slate-100 text-slate-600">ยกเลิก</button>
+                 <button type="button" onClick={submitMaintenanceLog} className="flex-1 py-4 rounded-2xl font-black text-xs uppercase bg-slate-900 text-white shadow-lg">บันทึก</button>
+              </div>
            </div>
         </div>
       )}
