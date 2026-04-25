@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package } from 'lucide-react';
+import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
@@ -125,19 +125,22 @@ const MAINTENANCE_ACCESS_LABEL = {
 };
 
 const FRIDGE_ASSET_TYPE = 'refrigerator';
+const GLOBAL_REFRIGERATORS_COLLECTION = 'refrigerators';
 
-async function reserveFirstAvailableFridge(dbConn, appIdStr, propertyId, orderedAssetIds, roomDocId) {
+async function reserveFirstAvailableFridge(dbConn, orderedAssetIds, roomDocId, buildingId, roomNo) {
   let assignedId = null;
   await runTransaction(dbConn, async (tx) => {
     for (const assetId of orderedAssetIds) {
-      const ref = doc(dbConn, 'apartments', appIdStr, 'assets', assetId);
+      const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, assetId);
       const snap = await tx.get(ref);
       if (!snap.exists()) continue;
       const d = snap.data();
-      if (d.type !== FRIDGE_ASSET_TYPE || d.propertyId !== propertyId || d.status !== 'available') continue;
+      if (d.type !== FRIDGE_ASSET_TYPE || d.status !== 'available') continue;
       tx.update(ref, {
         status: 'rented',
         assignedRoomKey: roomDocId,
+        currentBuilding: buildingId || null,
+        currentRoom: roomNo || null,
         updatedAt: new Date().toISOString()
       });
       assignedId = assetId;
@@ -147,9 +150,9 @@ async function reserveFirstAvailableFridge(dbConn, appIdStr, propertyId, ordered
   return assignedId;
 }
 
-async function releaseFridgeAsset(dbConn, appIdStr, assetId) {
+async function releaseFridgeAsset(dbConn, assetId) {
   if (!assetId) return;
-  const ref = doc(dbConn, 'apartments', appIdStr, 'assets', assetId);
+  const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, assetId);
   await runTransaction(dbConn, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) return;
@@ -209,6 +212,7 @@ export default function App() {
     customerCharge: '',
     newEquipmentPrice: ''
   });
+  const [inventoryTransferAssetId, setInventoryTransferAssetId] = useState('');
 
   useEffect(() => {
     signInAnonymously(auth).then(() => {
@@ -233,7 +237,7 @@ export default function App() {
         snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
         setMaintenanceLogs(rows);
       });
-      onSnapshot(collection(db, 'apartments', appId, 'assets'), (snap) => {
+      onSnapshot(collection(db, GLOBAL_REFRIGERATORS_COLLECTION), (snap) => {
         const data = {};
         snap.forEach((d) => {
           data[d.id] = d.data();
@@ -323,20 +327,33 @@ export default function App() {
   const fridgeStockByProperty = useMemo(() => {
     const byProp = {};
     Object.values(assets).forEach((a) => {
-      if (a.type !== FRIDGE_ASSET_TYPE || !a.propertyId) return;
-      if (!byProp[a.propertyId]) byProp[a.propertyId] = { available: 0, rented: 0, maintenance: 0 };
-      if (a.status === 'available') byProp[a.propertyId].available += 1;
-      else if (a.status === 'rented') byProp[a.propertyId].rented += 1;
-      else if (a.status === 'maintenance') byProp[a.propertyId].maintenance += 1;
+      if (a.type !== FRIDGE_ASSET_TYPE) return;
+      const building = a.currentBuilding || a.propertyId;
+      if (!building) return;
+      if (!byProp[building]) byProp[building] = { available: 0, rented: 0, maintenance: 0 };
+      if (a.status === 'available') byProp[building].available += 1;
+      else if (a.status === 'rented') byProp[building].rented += 1;
+      else if (a.status === 'maintenance') byProp[building].maintenance += 1;
     });
     return byProp;
   }, [assets]);
 
   const activeFridgeStock = fridgeStockByProperty[activePropertyId] || { available: 0, rented: 0, maintenance: 0 };
 
+  const fridgeInventorySummary = useMemo(() => {
+    return Object.values(assets).reduce((acc, a) => {
+      if (a.type !== FRIDGE_ASSET_TYPE) return acc;
+      acc.total += 1;
+      if (a.status === 'available') acc.available += 1;
+      else if (a.status === 'rented') acc.rented += 1;
+      else if (a.status === 'maintenance') acc.maintenance += 1;
+      return acc;
+    }, { total: 0, available: 0, rented: 0, maintenance: 0 });
+  }, [assets]);
+
   const getSortedAvailableFridgeIds = () =>
     Object.entries(assets)
-      .filter(([, a]) => a.propertyId === activePropertyId && a.type === FRIDGE_ASSET_TYPE && a.status === 'available')
+      .filter(([, a]) => a.type === FRIDGE_ASSET_TYPE && a.status === 'available')
       .map(([id]) => id)
       .sort();
 
@@ -359,13 +376,20 @@ export default function App() {
 
   const addFridgeAsset = async () => {
     if (userRole !== 'engineer') return;
-    const label = window.prompt('รหัส/ชื่อตู้ (ไม่บังคับ)') ?? '';
-    await addDoc(collection(db, 'apartments', appId, 'assets'), {
+    const assetId = (window.prompt('Asset ID (เช่น FR-001)') ?? '').trim();
+    const brand = (window.prompt('Brand (ยี่ห้อ)') ?? '').trim();
+    const size = (window.prompt('Size (ขนาด เช่น 7.4Q)') ?? '').trim();
+    const label = window.prompt('ชื่อแสดงผล (ไม่บังคับ)') ?? '';
+    await addDoc(collection(db, GLOBAL_REFRIGERATORS_COLLECTION), {
       type: FRIDGE_ASSET_TYPE,
-      propertyId: activePropertyId,
+      assetId: assetId || undefined,
+      brand: brand || '-',
+      size: size || '-',
       status: 'available',
       label: label.trim() || 'ตู้เย็นเช่า',
       assignedRoomKey: null,
+      currentBuilding: null,
+      currentRoom: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
@@ -378,11 +402,38 @@ export default function App() {
       alert('ตู้นี้ถูกผูกกับห้องอยู่ — ยกเลิกเช่าที่ห้องก่อนจึงจะเปลี่ยนสถานะได้');
       return;
     }
-    await setDoc(doc(db, 'apartments', appId, 'assets', assetId), {
+    await setDoc(doc(db, GLOBAL_REFRIGERATORS_COLLECTION, assetId), {
       ...cur,
       status: nextStatus,
+      currentRoom: nextStatus === 'available' ? null : cur.currentRoom || null,
       updatedAt: new Date().toISOString()
     });
+  };
+
+  const transferFridgeAsset = async () => {
+    if (userRole !== 'engineer') return;
+    const searchValue = (inventoryTransferAssetId || '').trim();
+    const matchedEntry = Object.entries(assets).find(([id, a]) => id === searchValue || a.assetId === searchValue);
+    const assetId = matchedEntry?.[0];
+    if (!assetId || !assets[assetId]) {
+      alert('ไม่พบ Asset ที่ต้องการโอน');
+      return;
+    }
+    const nextBuilding = (window.prompt('ย้ายไปอาคาร (property id เช่น mangmee/mytree/khunluang/meesap/meethong)') ?? '').trim();
+    const nextRoom = (window.prompt('ย้ายไปห้อง (ปล่อยว่างได้)') ?? '').trim();
+    if (!nextBuilding) {
+      alert('กรุณาระบุอาคารปลายทาง');
+      return;
+    }
+    const cur = assets[assetId];
+    await setDoc(doc(db, GLOBAL_REFRIGERATORS_COLLECTION, assetId), {
+      ...cur,
+      currentBuilding: nextBuilding,
+      currentRoom: nextRoom || null,
+      assignedRoomKey: nextRoom ? `${nextBuilding}_${nextRoom}` : null,
+      updatedAt: new Date().toISOString()
+    });
+    setInventoryTransferAssetId('');
   };
 
   const openRepairLogModal = (category) => {
@@ -463,16 +514,16 @@ export default function App() {
 
     if (userRole === 'sales' && form && (info.status === 'appointment' || info.status === 'booked') && nextStep !== 'ready') {
       if (!wantsRental && info.refrigeratorAssetId) {
-        await releaseFridgeAsset(db, appId, info.refrigeratorAssetId);
+        await releaseFridgeAsset(db, info.refrigeratorAssetId);
         updateData.refrigeratorStatus = 'none';
         delete updateData.refrigeratorAssetId;
         delete updateData.refrigeratorReadyAt;
       } else if (wantsRental && !info.refrigeratorAssetId) {
         const candidates = getSortedAvailableFridgeIds();
         if (candidates.length === 0) {
-          return alert('สินค้าหมด: ไม่มีตู้เย็นว่างในโครงการนี้ — ไม่สามารถรับจองเช่าตู้เพิ่มได้');
+          return alert('สินค้าหมด: ไม่มีตู้เย็นว่างในสต็อกกลาง — ไม่สามารถรับจองเช่าตู้เพิ่มได้');
         }
-        const assigned = await reserveFirstAvailableFridge(db, appId, activePropertyId, candidates, docId);
+        const assigned = await reserveFirstAvailableFridge(db, candidates, docId, activePropertyId, selectedRoom);
         if (!assigned) {
           return alert('สต็อกตู้เย็นไม่พอหรือมีผู้จองพร้อมกัน กรุณาลองใหม่');
         }
@@ -490,7 +541,7 @@ export default function App() {
     if (Object.keys(qcChecks).length > 0) updateData.qcData = qcChecks;
 
     if (nextStep === 'ready') {
-      if (info.refrigeratorAssetId) await releaseFridgeAsset(db, appId, info.refrigeratorAssetId);
+      if (info.refrigeratorAssetId) await releaseFridgeAsset(db, info.refrigeratorAssetId);
       const keysToDelete = [
         'repairData', 'qcData', 'qcNote', 'tenantName', 'tenantPhone',
         'deposit', 'insurance', 'checkoutDate', 'appointmentDate', 'appointmentTime',
@@ -567,6 +618,7 @@ export default function App() {
                <button onClick={()=>setViewMode('repairLog')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='repairLog'?'bg-amber-600 text-white shadow-sm':'text-slate-400'}`}>บันทึกซ่อม</button>
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
+               <button onClick={()=>setViewMode('inventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='inventory'?'bg-cyan-600 text-white shadow-sm':'text-slate-400'}`}>Inventory</button>
              </>
            )}
            <button onClick={()=>setUserRole(null)} className="p-2 text-slate-300 hover:text-rose-500"><Unlock size={18}/></button>
@@ -620,7 +672,7 @@ export default function App() {
                     <p className="text-[10px] font-bold opacity-70 mb-4">ว่าง {activeFridgeStock.available} · ถูกเช่า {activeFridgeStock.rented} · ซ่อม {activeFridgeStock.maintenance}</p>
                     <button type="button" onClick={addFridgeAsset} className="w-full sm:w-auto px-8 py-3 rounded-2xl bg-cyan-500 text-slate-900 font-black text-[10px] uppercase mb-4 active:scale-[0.98]">+ เพิ่มตู้ว่างเข้าสต็อก</button>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {Object.entries(assets).filter(([, a]) => a.propertyId === activePropertyId && a.type === FRIDGE_ASSET_TYPE).map(([id, a]) => (
+                      {Object.entries(assets).filter(([, a]) => (a.currentBuilding || a.propertyId) === activePropertyId && a.type === FRIDGE_ASSET_TYPE).map(([id, a]) => (
                         <div key={id} className="flex flex-wrap items-center justify-between gap-2 bg-white/10 p-3 rounded-xl text-[10px]">
                           <span className="font-black">{a.label || id.slice(0, 8)}</span>
                           <span className="opacity-80">{a.status === 'available' ? 'ว่าง' : a.status === 'rented' ? 'ถูกเช่า' : 'ซ่อม'}</span>
@@ -630,7 +682,7 @@ export default function App() {
                           </div>
                         </div>
                       ))}
-                      {Object.entries(assets).filter(([, a]) => a.propertyId === activePropertyId && a.type === FRIDGE_ASSET_TYPE).length === 0 && (
+                      {Object.entries(assets).filter(([, a]) => (a.currentBuilding || a.propertyId) === activePropertyId && a.type === FRIDGE_ASSET_TYPE).length === 0 && (
                         <p className="text-[10px] opacity-50 italic">ยังไม่มีรายการ — กดเพิ่มตู้ว่าง</p>
                       )}
                     </div>
@@ -758,7 +810,7 @@ export default function App() {
     </div> {/* 👈 ปิด Grid 5 กล่องสี */}
 
                   <div className="bg-cyan-700 p-6 rounded-[2.5rem] shadow-lg border-b-[6px] border-cyan-900 text-white">
-                    <h4 className="font-black text-[10px] uppercase mb-3 tracking-widest flex items-center gap-2"><Package size={14}/> สต็อกตู้เย็นเช่า (โครงการนี้)</h4>
+                    <h4 className="font-black text-[10px] uppercase mb-3 tracking-widest flex items-center gap-2"><Package size={14}/> สต็อกตู้เย็นเช่า (อ้างอิงสต็อกกลาง)</h4>
                     <div className="flex flex-wrap gap-6 text-sm font-black">
                       <span>ว่าง: <span className={activeFridgeStock.available === 0 ? 'text-rose-300' : 'text-emerald-200'}>{activeFridgeStock.available}</span></span>
                       <span>ถูกเช่า: {activeFridgeStock.rented}</span>
@@ -1053,6 +1105,63 @@ export default function App() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        ) : viewMode === 'inventory' ? (
+          <div className="space-y-6 animate-in fade-in font-sans">
+            <div className="bg-gradient-to-br from-cyan-700 to-slate-900 p-8 rounded-[3rem] text-white shadow-xl">
+              <h2 className="text-2xl md:text-3xl font-black italic uppercase flex items-center gap-3"><Package size={28}/> Asset Inventory · Refrigerators</h2>
+              <p className="text-[10px] font-bold opacity-80 mt-2">สต็อกกลางทุกโครงการ (เป้าหมาย 50 เครื่อง)</p>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-white">
+              <div className="bg-slate-900 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Units</p><p className="text-3xl font-black">{fridgeInventorySummary.total}</p></div>
+              <div className="bg-emerald-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Available</p><p className="text-3xl font-black">{fridgeInventorySummary.available}</p></div>
+              <div className="bg-indigo-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Rented</p><p className="text-3xl font-black">{fridgeInventorySummary.rented}</p></div>
+              <div className="bg-amber-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total in Repair</p><p className="text-3xl font-black">{fridgeInventorySummary.maintenance}</p></div>
+            </div>
+
+            <div className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-sm space-y-3">
+              <div className="flex flex-wrap gap-2 items-center">
+                <input value={inventoryTransferAssetId} onChange={(e) => setInventoryTransferAssetId(e.target.value)} placeholder="Document ID หรือ Asset ID ของตู้ที่จะโอน" className="flex-1 min-w-[220px] p-3 border-2 rounded-xl font-bold text-xs" />
+                <button type="button" onClick={transferFridgeAsset} className="px-5 py-3 rounded-xl bg-cyan-600 text-white font-black text-[10px] uppercase flex items-center gap-2"><ArrowRightLeft size={14}/> Transfer Asset</button>
+                <button type="button" onClick={addFridgeAsset} className="px-5 py-3 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase">+ Add Refrigerator</button>
+              </div>
+              <p className="text-[10px] text-slate-500 font-bold">โอนตู้ได้ทันทีระหว่างอาคาร/ห้อง โดยไม่ต้องแก้หลายจุด</p>
+            </div>
+
+            <div className="bg-white rounded-[2rem] border-2 border-slate-100 shadow-sm overflow-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead className="bg-slate-50 border-b text-slate-500 uppercase font-black">
+                  <tr>
+                    <th className="p-4">Asset ID</th>
+                    <th className="p-4">Brand</th>
+                    <th className="p-4">Size</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4">Current Building</th>
+                    <th className="p-4">Current Room</th>
+                    <th className="p-4">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(assets).filter(([, a]) => a.type === FRIDGE_ASSET_TYPE).map(([id, a]) => (
+                    <tr key={id} className="border-b border-slate-100">
+                      <td className="p-4 font-black">{a.assetId || id}</td>
+                      <td className="p-4">{a.brand || '-'}</td>
+                      <td className="p-4">{a.size || '-'}</td>
+                      <td className="p-4 font-black">{a.status || '-'}</td>
+                      <td className="p-4">{a.currentBuilding || '-'}</td>
+                      <td className="p-4">{a.currentRoom || '-'}</td>
+                      <td className="p-4">
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setFridgeAssetStatus(id, 'available')} className="px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 font-black text-[9px]">Available</button>
+                          <button type="button" onClick={() => setFridgeAssetStatus(id, 'maintenance')} className="px-2 py-1 rounded-lg bg-amber-100 text-amber-700 font-black text-[9px]">Repair</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ) : viewMode === 'repairLog' ? (
@@ -1394,7 +1503,7 @@ if (cur === 'appointment') return (
         <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-pink-600 shrink-0" />
         <div>
           <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
-          <p className="text-[9px] font-bold text-slate-500 mt-1">เมื่อติ๊ก ระบบจะหักสต็อก &quot;ว่าง&quot; ทันที — ตู้ว่างในโครงการนี้: <span className="text-pink-600">{activeFridgeStock.available}</span> เครื่อง</p>
+          <p className="text-[9px] font-bold text-slate-500 mt-1">เมื่อติ๊ก ระบบจะหักสต็อกกลางทันที — ตู้ว่างทั้งหมด: <span className="text-pink-600">{fridgeInventorySummary.available}</span> เครื่อง</p>
         </div>
       </label>
 
@@ -1454,7 +1563,7 @@ if (cur === 'booked') return (
         <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-purple-600 shrink-0" />
         <div>
           <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
-          <p className="text-[9px] font-bold text-slate-500 mt-1">สต็อกว่าง: <span className="text-purple-600">{activeFridgeStock.available}</span> เครื่อง — ติ๊กแล้วบันทึกเพื่อหักสต็อก</p>
+          <p className="text-[9px] font-bold text-slate-500 mt-1">สต็อกกลางว่าง: <span className="text-purple-600">{fridgeInventorySummary.available}</span> เครื่อง — ติ๊กแล้วบันทึกเพื่อหักสต็อก</p>
         </div>
       </label>
     </div>
