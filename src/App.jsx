@@ -3,6 +3,8 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
+import Inventory from './pages/Inventory';
+import Facility from './pages/Facility';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
@@ -619,6 +621,7 @@ export default function App() {
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
                <button onClick={()=>setViewMode('inventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='inventory'?'bg-cyan-600 text-white shadow-sm':'text-slate-400'}`}>Inventory</button>
+               <button onClick={()=>setViewMode('facility')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='facility'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>Facility</button>
              </>
            )}
            <button onClick={()=>setUserRole(null)} className="p-2 text-slate-300 hover:text-rose-500"><Unlock size={18}/></button>
@@ -1108,62 +1111,9 @@ export default function App() {
             </div>
           </div>
         ) : viewMode === 'inventory' ? (
-          <div className="space-y-6 animate-in fade-in font-sans">
-            <div className="bg-gradient-to-br from-cyan-700 to-slate-900 p-8 rounded-[3rem] text-white shadow-xl">
-              <h2 className="text-2xl md:text-3xl font-black italic uppercase flex items-center gap-3"><Package size={28}/> Asset Inventory · Refrigerators</h2>
-              <p className="text-[10px] font-bold opacity-80 mt-2">สต็อกกลางทุกโครงการ (เป้าหมาย 50 เครื่อง)</p>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-white">
-              <div className="bg-slate-900 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Units</p><p className="text-3xl font-black">{fridgeInventorySummary.total}</p></div>
-              <div className="bg-emerald-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Available</p><p className="text-3xl font-black">{fridgeInventorySummary.available}</p></div>
-              <div className="bg-indigo-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total Rented</p><p className="text-3xl font-black">{fridgeInventorySummary.rented}</p></div>
-              <div className="bg-amber-600 p-6 rounded-[2rem]"><p className="text-[9px] opacity-60 font-black uppercase">Total in Repair</p><p className="text-3xl font-black">{fridgeInventorySummary.maintenance}</p></div>
-            </div>
-
-            <div className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-sm space-y-3">
-              <div className="flex flex-wrap gap-2 items-center">
-                <input value={inventoryTransferAssetId} onChange={(e) => setInventoryTransferAssetId(e.target.value)} placeholder="Document ID หรือ Asset ID ของตู้ที่จะโอน" className="flex-1 min-w-[220px] p-3 border-2 rounded-xl font-bold text-xs" />
-                <button type="button" onClick={transferFridgeAsset} className="px-5 py-3 rounded-xl bg-cyan-600 text-white font-black text-[10px] uppercase flex items-center gap-2"><ArrowRightLeft size={14}/> Transfer Asset</button>
-                <button type="button" onClick={addFridgeAsset} className="px-5 py-3 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase">+ Add Refrigerator</button>
-              </div>
-              <p className="text-[10px] text-slate-500 font-bold">โอนตู้ได้ทันทีระหว่างอาคาร/ห้อง โดยไม่ต้องแก้หลายจุด</p>
-            </div>
-
-            <div className="bg-white rounded-[2rem] border-2 border-slate-100 shadow-sm overflow-auto">
-              <table className="w-full text-left text-[11px]">
-                <thead className="bg-slate-50 border-b text-slate-500 uppercase font-black">
-                  <tr>
-                    <th className="p-4">Asset ID</th>
-                    <th className="p-4">Brand</th>
-                    <th className="p-4">Size</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4">Current Building</th>
-                    <th className="p-4">Current Room</th>
-                    <th className="p-4">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(assets).filter(([, a]) => a.type === FRIDGE_ASSET_TYPE).map(([id, a]) => (
-                    <tr key={id} className="border-b border-slate-100">
-                      <td className="p-4 font-black">{a.assetId || id}</td>
-                      <td className="p-4">{a.brand || '-'}</td>
-                      <td className="p-4">{a.size || '-'}</td>
-                      <td className="p-4 font-black">{a.status || '-'}</td>
-                      <td className="p-4">{a.currentBuilding || '-'}</td>
-                      <td className="p-4">{a.currentRoom || '-'}</td>
-                      <td className="p-4">
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => setFridgeAssetStatus(id, 'available')} className="px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 font-black text-[9px]">Available</button>
-                          <button type="button" onClick={() => setFridgeAssetStatus(id, 'maintenance')} className="px-2 py-1 rounded-lg bg-amber-100 text-amber-700 font-black text-[9px]">Repair</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <Inventory />
+        ) : viewMode === 'facility' ? (
+          <Facility />
         ) : viewMode === 'repairLog' ? (
            <div className="space-y-8 animate-in fade-in font-sans max-w-6xl mx-auto pb-10">
               <div className="bg-gradient-to-br from-amber-600 to-orange-700 p-10 rounded-[3rem] text-white shadow-2xl">
