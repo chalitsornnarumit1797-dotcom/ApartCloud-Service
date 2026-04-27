@@ -1,25 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction } from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
 import Inventory from './pages/Inventory';
 import Facility from './pages/Facility';
+import { auth, db } from './firebase';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
-const firebaseConfig = {
-  apiKey: "AIzaSyASTtm9rgugCwKhcRC27j5ugJHFWbhM_8k",
-  authDomain: "chalitsorn-s-workspace.firebaseapp.com",
-  projectId: "chalitsorn-s-workspace",
-  storageBucket: "chalitsorn-s-workspace.firebasestorage.app",
-  messagingSenderId: "823661781920",
-  appId: "1:823661781920:web:c92e026e81478b4ff63ac5",
-};
-
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
 const appId = 'apartcloud-service'; 
 
 const BANK_ACCOUNTS = {
@@ -129,27 +117,49 @@ const MAINTENANCE_ACCESS_LABEL = {
 const FRIDGE_ASSET_TYPE = 'refrigerator';
 const GLOBAL_REFRIGERATORS_COLLECTION = 'refrigerators';
 
-async function reserveFirstAvailableFridge(dbConn, orderedAssetIds, roomDocId, buildingId, roomNo) {
-  let assignedId = null;
+async function reserveSpecificFridge(dbConn, assetId, roomDocId, buildingId, roomNo) {
+  if (!assetId) return false;
+  let reserved = false;
   await runTransaction(dbConn, async (tx) => {
-    for (const assetId of orderedAssetIds) {
-      const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, assetId);
-      const snap = await tx.get(ref);
-      if (!snap.exists()) continue;
-      const d = snap.data();
-      if (d.type !== FRIDGE_ASSET_TYPE || d.status !== 'available') continue;
-      tx.update(ref, {
-        status: 'rented',
-        assignedRoomKey: roomDocId,
-        currentBuilding: buildingId || null,
-        currentRoom: roomNo || null,
-        updatedAt: new Date().toISOString()
-      });
-      assignedId = assetId;
-      break;
-    }
+    const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, assetId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const d = snap.data();
+    if (d.type !== FRIDGE_ASSET_TYPE || d.status !== 'available') return;
+    tx.update(ref, {
+      status: 'rented',
+      assignedRoomKey: roomDocId,
+      propertyId: buildingId || null,
+      currentBuilding: buildingId || null,
+      currentRoom: roomNo || null,
+      updatedAt: new Date().toISOString()
+    });
+    reserved = true;
   });
-  return assignedId;
+  return reserved;
+}
+
+async function ensureFridgeRentedForRoom(dbConn, assetId, roomDocId, buildingId, roomNo) {
+  if (!assetId) return false;
+  let updated = false;
+  await runTransaction(dbConn, async (tx) => {
+    const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, assetId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const data = snap.data();
+    const isSameRoom = data.assignedRoomKey === roomDocId;
+    if (data.status !== 'available' && !isSameRoom) return;
+    tx.update(ref, {
+      status: 'rented',
+      assignedRoomKey: roomDocId,
+      propertyId: buildingId || null,
+      currentBuilding: buildingId || null,
+      currentRoom: roomNo || null,
+      updatedAt: new Date().toISOString()
+    });
+    updated = true;
+  });
+  return updated;
 }
 
 async function releaseFridgeAsset(dbConn, assetId) {
@@ -168,25 +178,82 @@ async function releaseFridgeAsset(dbConn, assetId) {
   });
 }
 
+function getRoomDocRef(dbConn, roomDocId) {
+  return doc(dbConn, 'apartments', appId, 'rooms', roomDocId);
+}
+
+async function updateRoomWithFridgeTransaction(dbConn, {
+  roomDocId,
+  nextRoomData,
+  nextFridgeAssetId,
+  clearFridgeFromRoom
+}) {
+  let reserveFailed = false;
+  await runTransaction(dbConn, async (tx) => {
+    const roomRef = getRoomDocRef(dbConn, roomDocId);
+    const roomSnap = await tx.get(roomRef);
+    const roomInfo = roomSnap.exists() ? (roomSnap.data() || {}) : {};
+    const currentFridgeAssetId = roomInfo.refrigeratorAssetId || null;
+    const willAssignFridge = Boolean(nextFridgeAssetId);
+    const shouldReleaseCurrent = Boolean(
+      currentFridgeAssetId &&
+      (clearFridgeFromRoom || !willAssignFridge || nextFridgeAssetId !== currentFridgeAssetId)
+    );
+
+    if (shouldReleaseCurrent) {
+      const currentFridgeRef = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, currentFridgeAssetId);
+      const currentFridgeSnap = await tx.get(currentFridgeRef);
+      if (currentFridgeSnap.exists()) {
+        tx.update(currentFridgeRef, {
+          status: 'available',
+          assignedRoomKey: null,
+          currentBuilding: null,
+          currentRoom: null,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+
+    if (willAssignFridge) {
+      const nextFridgeRef = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, nextFridgeAssetId);
+      const nextFridgeSnap = await tx.get(nextFridgeRef);
+      if (!nextFridgeSnap.exists()) {
+        reserveFailed = true;
+        return;
+      }
+      const nextFridgeData = nextFridgeSnap.data();
+      const isCurrentRoom = nextFridgeData.assignedRoomKey === roomDocId;
+      if (nextFridgeData.type !== FRIDGE_ASSET_TYPE || (nextFridgeData.status !== 'available' && !isCurrentRoom)) {
+        reserveFailed = true;
+        return;
+      }
+      tx.update(nextFridgeRef, {
+        status: 'rented',
+        assignedRoomKey: roomDocId,
+        propertyId: nextRoomData.propertyId || null,
+        currentBuilding: nextRoomData.propertyName || nextRoomData.propertyId || null,
+        currentRoom: roomDocId.split('_')[1] || null,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    tx.set(roomRef, nextRoomData);
+  });
+  return !reserveFailed;
+}
+
 async function syncFridgeAssetWithRoomStatus(dbConn, roomDocId, roomInfo) {
   const refrigeratorAssetId = roomInfo?.refrigeratorAssetId;
   if (!refrigeratorAssetId) return;
-
-  const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, refrigeratorAssetId);
-  await runTransaction(dbConn, async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) return;
-
-    const current = snap.data();
-    tx.update(ref, {
-      ...current,
-      status: roomInfo?.status === 'rented' ? 'rented' : current.status,
-      assignedRoomKey: roomDocId,
-      currentBuilding: roomInfo?.propertyId || current.currentBuilding || null,
-      currentRoom: roomDocId.split('_')[1] || current.currentRoom || null,
-      updatedAt: new Date().toISOString()
-    });
-  });
+  if (roomInfo?.status === 'rented') {
+    await ensureFridgeRentedForRoom(
+      dbConn,
+      refrigeratorAssetId,
+      roomDocId,
+      roomInfo?.propertyId,
+      roomDocId.split('_')[1] || null
+    );
+  }
 }
 
 function maintenanceDateYmd(value) {
@@ -365,22 +432,20 @@ export default function App() {
 
   const activeFridgeStock = fridgeStockByProperty[activePropertyId] || { available: 0, rented: 0, maintenance: 0 };
 
-  const fridgeInventorySummary = useMemo(() => {
-    return Object.values(assets).reduce((acc, a) => {
-      if (a.type !== FRIDGE_ASSET_TYPE) return acc;
-      acc.total += 1;
-      if (a.status === 'available') acc.available += 1;
-      else if (a.status === 'rented') acc.rented += 1;
-      else if (a.status === 'maintenance') acc.maintenance += 1;
-      return acc;
-    }, { total: 0, available: 0, rented: 0, maintenance: 0 });
-  }, [assets]);
-
-  const getSortedAvailableFridgeIds = () =>
+  const getAvailableFridgeEntriesForProperty = (propertyId, selectedAssetId = '') =>
     Object.entries(assets)
-      .filter(([, a]) => a.type === FRIDGE_ASSET_TYPE && a.status === 'available')
-      .map(([id]) => id)
-      .sort();
+      .filter(([id, a]) => {
+        if (a.type !== FRIDGE_ASSET_TYPE) return false;
+        if (id === selectedAssetId) return true;
+        const sameProperty = (a.propertyId || a.currentBuilding) === propertyId;
+        if (!sameProperty) return false;
+        return a.status === 'available';
+      })
+      .sort((a, b) => {
+        const codeA = String(a[1].assetId || a[0]);
+        const codeB = String(b[1].assetId || b[0]);
+        return codeA.localeCompare(codeB);
+      });
 
   const handleConfirmFridgeInRoom = async () => {
     const docId = `${activePropertyId}_${selectedRoom}`;
@@ -502,6 +567,7 @@ export default function App() {
   const handleUpdateRoom = async (nextStep) => {
     const docId = `${activePropertyId}_${selectedRoom}`;
     const timestamp = new Date().toLocaleString('th-TH');
+    const activePropertyName = PROPERTIES.find((p) => p.id === activePropertyId)?.name || activePropertyId;
     const info = roomStates[docId] || { status: 'ready' };
 
     const currentStepOwner = STEPS[info.status]?.owner;
@@ -518,14 +584,17 @@ export default function App() {
       status: nextStep,
       lastUpdateBy: userRole === 'sales' ? 'ฝ่ายขาย (Sales)' : 'ฝ่ายช่าง (Engineer)',
       lastUpdateTime: timestamp,
-      propertyId: activePropertyId
+      propertyId: activePropertyId,
+      propertyName: activePropertyName
     };
 
     const form = document.getElementById('modalForm');
+    let selectedFridgeAssetId = '';
     let wantsRental = false;
     if (form) {
       const formData = new FormData(form);
-      wantsRental = formData.get('needRefrigerator') === 'on';
+      selectedFridgeAssetId = String(formData.get('refrigeratorAssetId') || '').trim();
+      wantsRental = Boolean(selectedFridgeAssetId);
 
       if (formData.get('tName')) updateData.tenantName = formData.get('tName');
       if (formData.get('tPhone')) updateData.tenantPhone = formData.get('tPhone');
@@ -539,20 +608,11 @@ export default function App() {
 
     if (userRole === 'sales' && form && (info.status === 'appointment' || info.status === 'booked' || info.status === 'rented') && nextStep !== 'ready') {
       if (!wantsRental && info.refrigeratorAssetId) {
-        await releaseFridgeAsset(db, info.refrigeratorAssetId);
         updateData.refrigeratorStatus = 'none';
         delete updateData.refrigeratorAssetId;
         delete updateData.refrigeratorReadyAt;
-      } else if (wantsRental && !info.refrigeratorAssetId) {
-        const candidates = getSortedAvailableFridgeIds();
-        if (candidates.length === 0) {
-          return alert('สินค้าหมด: ไม่มีตู้เย็นว่างในสต็อกกลาง — ไม่สามารถรับจองเช่าตู้เพิ่มได้');
-        }
-        const assigned = await reserveFirstAvailableFridge(db, candidates, docId, activePropertyId, selectedRoom);
-        if (!assigned) {
-          return alert('สต็อกตู้เย็นไม่พอหรือมีผู้จองพร้อมกัน กรุณาลองใหม่');
-        }
-        updateData.refrigeratorAssetId = assigned;
+      } else if (wantsRental && selectedFridgeAssetId !== info.refrigeratorAssetId) {
+        updateData.refrigeratorAssetId = selectedFridgeAssetId;
         updateData.refrigeratorStatus = info.status === 'rented' ? 'installed' : 'requested';
         if (info.status === 'rented') {
           updateData.refrigeratorReadyAt = timestamp;
@@ -574,7 +634,6 @@ export default function App() {
     if (Object.keys(qcChecks).length > 0) updateData.qcData = qcChecks;
 
     if (nextStep === 'ready') {
-      if (info.refrigeratorAssetId) await releaseFridgeAsset(db, info.refrigeratorAssetId);
       const keysToDelete = [
         'repairData', 'qcData', 'qcNote', 'tenantName', 'tenantPhone',
         'deposit', 'insurance', 'checkoutDate', 'appointmentDate', 'appointmentTime',
@@ -583,7 +642,27 @@ export default function App() {
       keysToDelete.forEach((key) => delete updateData[key]);
     }
 
-    await setDoc(doc(db, 'apartments', appId, 'rooms', docId), updateData);
+    const shouldHandleFridgeInTransaction = userRole === 'sales' || nextStep === 'ready' || nextStep === 'checkingOut';
+    if (shouldHandleFridgeInTransaction) {
+      const clearFridgeFromRoom = nextStep === 'ready' || nextStep === 'checkingOut' || !updateData.refrigeratorAssetId;
+      if (nextStep === 'ready' || nextStep === 'checkingOut') {
+        updateData.refrigeratorStatus = 'none';
+        delete updateData.refrigeratorAssetId;
+        delete updateData.refrigeratorReadyAt;
+      }
+      const synced = await updateRoomWithFridgeTransaction(db, {
+        roomDocId: docId,
+        nextRoomData: updateData,
+        nextFridgeAssetId: updateData.refrigeratorAssetId || null,
+        clearFridgeFromRoom
+      });
+      if (!synced) {
+        return alert('ตู้เย็นที่เลือกไม่พร้อมใช้งานแล้ว กรุณาเลือกใหม่');
+      }
+    } else {
+      await setDoc(getRoomDocRef(db, docId), updateData);
+    }
+
     if (nextStep === 'rented' && updateData.refrigeratorAssetId) {
       await syncFridgeAssetWithRoomStatus(db, docId, updateData);
     }
@@ -1483,13 +1562,24 @@ if (cur === 'appointment') return (
           <input name="appointmentTime" defaultValue={info.appointmentTime} className="w-full p-4 bg-white border-2 border-rose-200 rounded-2xl font-black text-sm text-rose-600 outline-none" placeholder="14:30" />
         </div>
       </div>
-      <label className="flex items-start gap-3 bg-white p-4 rounded-2xl border-2 border-pink-100 cursor-pointer">
-        <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-pink-600 shrink-0" />
-        <div>
-          <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
-          <p className="text-[9px] font-bold text-slate-500 mt-1">เมื่อติ๊ก ระบบจะหักสต็อกกลางทันที — ตู้ว่างทั้งหมด: <span className="text-pink-600">{fridgeInventorySummary.available}</span> เครื่อง</p>
-        </div>
-      </label>
+      {(() => {
+        const selectedValue = info.refrigeratorAssetId || '';
+        const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
+        return (
+          <div className="bg-white p-4 rounded-2xl border-2 border-pink-100 space-y-2">
+            <p className="text-xs font-black text-slate-800">เช่าตู้เย็น (เลือกจากรายการตู้ว่าง)</p>
+            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-pink-200 rounded-xl font-bold text-sm outline-none">
+              <option value="">ไม่เช่าตู้เย็น</option>
+              {fridgeOptions.map(([id, a]) => (
+                <option key={id} value={id}>
+                  {a.assetId || id}
+                </option>
+              ))}
+            </select>
+            <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-pink-600">{fridgeOptions.length}</span> เครื่อง</p>
+          </div>
+        );
+      })()}
 
       <button type="button" onClick={() => handleUpdateRoom('appointment')} className="w-full py-3 bg-white border-2 border-pink-200 text-pink-500 rounded-xl font-bold text-xs hover:bg-pink-500 hover:text-white transition-all">
         อัปเดตข้อมูลนัดหมาย (บันทึกไว้ดูในหน้าสรุป)
@@ -1543,13 +1633,24 @@ if (cur === 'booked') return (
           <input name="appointmentTime" defaultValue={info.appointmentTime} className="w-full p-4 bg-white border-2 border-purple-200 rounded-2xl font-black text-sm text-purple-600 outline-none" placeholder="09:00" />
         </div>
       </div>
-      <label className="flex items-start gap-3 bg-white p-4 rounded-2xl border-2 border-purple-100 cursor-pointer">
-        <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-purple-600 shrink-0" />
-        <div>
-          <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
-          <p className="text-[9px] font-bold text-slate-500 mt-1">สต็อกกลางว่าง: <span className="text-purple-600">{fridgeInventorySummary.available}</span> เครื่อง — ติ๊กแล้วบันทึกเพื่อหักสต็อก</p>
-        </div>
-      </label>
+      {(() => {
+        const selectedValue = info.refrigeratorAssetId || '';
+        const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
+        return (
+          <div className="bg-white p-4 rounded-2xl border-2 border-purple-100 space-y-2">
+            <p className="text-xs font-black text-slate-800">เลือกตู้เย็นจากสต็อก</p>
+            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-purple-200 rounded-xl font-bold text-sm outline-none">
+              <option value="">ไม่เช่าตู้เย็น</option>
+              {fridgeOptions.map(([id, a]) => (
+                <option key={id} value={id}>
+                  {a.assetId || id}
+                </option>
+              ))}
+            </select>
+            <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-purple-600">{fridgeOptions.length}</span> เครื่อง</p>
+          </div>
+        );
+      })()}
     </div>
     <div className="grid grid-cols-1 gap-3">
       <button type="button" onClick={() => handleUpdateRoom('booked')} className="w-full bg-white border-2 border-purple-300 text-purple-700 py-4 rounded-2xl font-black text-xs uppercase shadow-sm active:scale-[0.99]">บันทึกข้อมูลจอง (ยังไม่ทำสัญญา)</button>
@@ -1586,13 +1687,24 @@ if (cur === 'rented') return (
           <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-emerald-600" />
         </div>
       </div>
-      <label className="flex items-start gap-3 bg-white p-4 rounded-2xl border-2 border-slate-200 cursor-pointer">
-        <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-slate-700 shrink-0" />
-        <div>
-          <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
-          <p className="text-[9px] font-bold text-slate-500 mt-1">สต็อกกลางว่าง: <span className="text-slate-700">{fridgeInventorySummary.available}</span> เครื่อง — บันทึกแล้วจะผูก/คืนตู้กับห้องนี้ทันที</p>
-        </div>
-      </label>
+      {(() => {
+        const selectedValue = info.refrigeratorAssetId || '';
+        const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
+        return (
+          <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 space-y-2">
+            <p className="text-xs font-black text-slate-800">เลือกตู้เย็นจากสต็อก</p>
+            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-sm outline-none">
+              <option value="">ไม่เช่าตู้เย็น</option>
+              {fridgeOptions.map(([id, a]) => (
+                <option key={id} value={id}>
+                  {a.assetId || id}
+                </option>
+              ))}
+            </select>
+            <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-slate-700">{fridgeOptions.length}</span> เครื่อง</p>
+          </div>
+        );
+      })()}
     </div>
 
     <div className="grid grid-cols-1 gap-3">
