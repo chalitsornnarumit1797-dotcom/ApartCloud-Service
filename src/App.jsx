@@ -161,6 +161,29 @@ async function releaseFridgeAsset(dbConn, assetId) {
     tx.update(ref, {
       status: 'available',
       assignedRoomKey: null,
+      currentBuilding: null,
+      currentRoom: null,
+      updatedAt: new Date().toISOString()
+    });
+  });
+}
+
+async function syncFridgeAssetWithRoomStatus(dbConn, roomDocId, roomInfo) {
+  const refrigeratorAssetId = roomInfo?.refrigeratorAssetId;
+  if (!refrigeratorAssetId) return;
+
+  const ref = doc(dbConn, GLOBAL_REFRIGERATORS_COLLECTION, refrigeratorAssetId);
+  await runTransaction(dbConn, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+
+    const current = snap.data();
+    tx.update(ref, {
+      ...current,
+      status: roomInfo?.status === 'rented' ? 'rented' : current.status,
+      assignedRoomKey: roomDocId,
+      currentBuilding: roomInfo?.propertyId || current.currentBuilding || null,
+      currentRoom: roomDocId.split('_')[1] || current.currentRoom || null,
       updatedAt: new Date().toISOString()
     });
   });
@@ -514,7 +537,7 @@ export default function App() {
       if (formData.get('qcNote')) updateData.qcNote = formData.get('qcNote');
     }
 
-    if (userRole === 'sales' && form && (info.status === 'appointment' || info.status === 'booked') && nextStep !== 'ready') {
+    if (userRole === 'sales' && form && (info.status === 'appointment' || info.status === 'booked' || info.status === 'rented') && nextStep !== 'ready') {
       if (!wantsRental && info.refrigeratorAssetId) {
         await releaseFridgeAsset(db, info.refrigeratorAssetId);
         updateData.refrigeratorStatus = 'none';
@@ -530,10 +553,18 @@ export default function App() {
           return alert('สต็อกตู้เย็นไม่พอหรือมีผู้จองพร้อมกัน กรุณาลองใหม่');
         }
         updateData.refrigeratorAssetId = assigned;
-        updateData.refrigeratorStatus = 'requested';
+        updateData.refrigeratorStatus = info.status === 'rented' ? 'installed' : 'requested';
+        if (info.status === 'rented') {
+          updateData.refrigeratorReadyAt = timestamp;
+        }
       } else if (wantsRental && info.refrigeratorAssetId) {
         updateData.refrigeratorAssetId = info.refrigeratorAssetId;
-        updateData.refrigeratorStatus = info.refrigeratorStatus === 'installed' ? 'installed' : 'requested';
+        updateData.refrigeratorStatus = info.status === 'rented'
+          ? 'installed'
+          : (info.refrigeratorStatus === 'installed' ? 'installed' : 'requested');
+        if (info.status === 'rented' && !updateData.refrigeratorReadyAt) {
+          updateData.refrigeratorReadyAt = timestamp;
+        }
       } else if (!wantsRental && !info.refrigeratorAssetId) {
         updateData.refrigeratorStatus = 'none';
       }
@@ -553,6 +584,9 @@ export default function App() {
     }
 
     await setDoc(doc(db, 'apartments', appId, 'rooms', docId), updateData);
+    if (nextStep === 'rented' && updateData.refrigeratorAssetId) {
+      await syncFridgeAssetWithRoomStatus(db, docId, updateData);
+    }
 
     setSelectedRoom(null);
     setRepairs({});
@@ -1552,6 +1586,13 @@ if (cur === 'rented') return (
           <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-emerald-600" />
         </div>
       </div>
+      <label className="flex items-start gap-3 bg-white p-4 rounded-2xl border-2 border-slate-200 cursor-pointer">
+        <input type="checkbox" name="needRefrigerator" defaultChecked={!!info.refrigeratorAssetId} className="mt-1 w-5 h-5 accent-slate-700 shrink-0" />
+        <div>
+          <span className="text-xs font-black text-slate-800">ลูกค้าต้องการเช่าตู้เย็น</span>
+          <p className="text-[9px] font-bold text-slate-500 mt-1">สต็อกกลางว่าง: <span className="text-slate-700">{fridgeInventorySummary.available}</span> เครื่อง — บันทึกแล้วจะผูก/คืนตู้กับห้องนี้ทันที</p>
+        </div>
+      </label>
     </div>
 
     <div className="grid grid-cols-1 gap-3">
