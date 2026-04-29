@@ -4,11 +4,42 @@ import { signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
 import Inventory from './pages/Inventory';
 import Facility from './pages/Facility';
+import ManagementDashboard from './pages/ManagementDashboard';
 import { auth, db } from './firebase';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
 const SALES_PIN = "111111"; // สำหรับ Sales Mode
+const MANAGEMENT_PIN = "333333"; // สำหรับ Management Mode
 const appId = 'apartcloud-service'; 
+const MODE_CONFIG = {
+  sales: {
+    label: 'SALES MODE',
+    shortLabel: 'SALES',
+    pin: SALES_PIN,
+    defaultView: 'grid',
+    allowedViews: ['grid', 'summary'],
+    entryClass: 'from-blue-500 to-blue-700 text-white border-blue-300/60',
+    pillClass: 'bg-blue-100 text-blue-700'
+  },
+  engineer: {
+    label: 'ENGINEER MODE',
+    shortLabel: 'ENGINEER',
+    pin: ACCESS_PIN,
+    defaultView: 'grid',
+    allowedViews: ['grid', 'summary', 'repairLog', 'airPlanner', 'wmPlanner', 'inventory', 'facility'],
+    entryClass: 'from-red-500 to-rose-700 text-white border-red-300/60',
+    pillClass: 'bg-rose-100 text-rose-700'
+  },
+  management: {
+    label: 'MANAGEMENT MODE',
+    shortLabel: 'MANAGEMENT',
+    pin: MANAGEMENT_PIN,
+    defaultView: 'management',
+    allowedViews: ['management', 'partnerReport'],
+    entryClass: 'from-slate-900 to-amber-700 text-amber-100 border-amber-400/60',
+    pillClass: 'bg-amber-100 text-amber-700'
+  }
+};
 
 const BANK_ACCOUNTS = {
   "บ้านมั่งมีทวีสุข": "กสิกรไทย: 051-1-88802-6 (ชวนันท์ สุขพรชัยรัก)",
@@ -278,7 +309,8 @@ const PROPERTIES = [
 ];
 
 export default function App() {
-  const [userRole, setUserRole] = useState(null); // 'engineer' | 'sales'
+  const [userRole, setUserRole] = useState(null); // 'engineer' | 'sales' | 'management'
+  const [loginMode, setLoginMode] = useState(null);
   const [pinInput, setPinInput] = useState("");
   const [activePropertyId, setActivePropertyId] = useState('mangmee');
   const [viewMode, setViewMode] = useState('grid');
@@ -305,6 +337,13 @@ export default function App() {
     newEquipmentPrice: ''
   });
   const [inventoryTransferAssetId, setInventoryTransferAssetId] = useState('');
+
+  useEffect(() => {
+    if (!userRole || !MODE_CONFIG[userRole]) return;
+    if (!MODE_CONFIG[userRole].allowedViews.includes(viewMode)) {
+      setViewMode(MODE_CONFIG[userRole].defaultView);
+    }
+  }, [userRole, viewMode]);
 
   useEffect(() => {
     signInAnonymously(auth).then(() => {
@@ -680,6 +719,87 @@ export default function App() {
     await setDoc(doc(db, 'apartments', appId, col, docId), { ...cur, [field]: value, updateBy: userRole === 'sales' ? 'Sales' : 'Engineer', updatedAt: new Date().toLocaleString('th-TH'), propertyId: activePropertyId });
   };
 
+  const handleDashboardRoomTaskUpdate = async (roomDocId, taskStatus) => {
+    const info = roomStates[roomDocId];
+    if (!info) return;
+    const nowIso = new Date().toISOString();
+    const timestamp = new Date().toLocaleString('th-TH');
+    const nextRoomStatus = taskStatus === 'done' && STEPS[info.status]?.next
+      ? STEPS[info.status].next
+      : info.status;
+    await setDoc(doc(db, 'apartments', appId, 'rooms', roomDocId), {
+      ...info,
+      status: nextRoomStatus,
+      managementTaskStatus: taskStatus,
+      managementUpdatedAt: nowIso,
+      managementPostponedTo: null,
+      lastUpdateBy: userRole === 'sales'
+        ? 'Management Dashboard (Sales)'
+        : userRole === 'management'
+          ? 'Management Dashboard (Management)'
+          : 'Management Dashboard (Engineer)',
+      lastUpdateTime: timestamp
+    });
+  };
+
+  const handleDashboardRoomTaskPostpone = async (roomDocId, nextDate) => {
+    const info = roomStates[roomDocId];
+    if (!info) return;
+    await setDoc(doc(db, 'apartments', appId, 'rooms', roomDocId), {
+      ...info,
+      managementTaskStatus: 'pending',
+      managementPostponedTo: nextDate,
+      managementUpdatedAt: new Date().toISOString(),
+      managementPostponedCount: (info.managementPostponedCount || 0) + 1
+    });
+  };
+
+  const handleDashboardMaintenanceTaskUpdate = async (logId, taskStatus) => {
+    const current = maintenanceLogs.find((log) => log.id === logId);
+    if (!current) return;
+    await setDoc(doc(db, 'apartments', appId, 'maintenance_logs', logId), {
+      ...current,
+      taskStatus,
+      postponedTo: null,
+      updatedAt: new Date().toISOString(),
+      updatedBy: userRole || 'dashboard'
+    });
+  };
+
+  const handleDashboardMaintenanceTaskPostpone = async (logId, nextDate) => {
+    const current = maintenanceLogs.find((log) => log.id === logId);
+    if (!current) return;
+    await setDoc(doc(db, 'apartments', appId, 'maintenance_logs', logId), {
+      ...current,
+      taskStatus: 'pending',
+      postponedTo: nextDate,
+      updatedAt: new Date().toISOString(),
+      updatedBy: userRole || 'dashboard',
+      postponeCount: (current.postponeCount || 0) + 1
+    });
+  };
+
+  const handleDashboardRoomExecutionDate = async (roomDocId, executionDate) => {
+    const info = roomStates[roomDocId];
+    if (!info) return;
+    await setDoc(doc(db, 'apartments', appId, 'rooms', roomDocId), {
+      ...info,
+      managementExecutionDate: executionDate || null,
+      managementUpdatedAt: new Date().toISOString()
+    });
+  };
+
+  const handleDashboardMaintenanceExecutionDate = async (logId, executionDate) => {
+    const current = maintenanceLogs.find((log) => log.id === logId);
+    if (!current) return;
+    await setDoc(doc(db, 'apartments', appId, 'maintenance_logs', logId), {
+      ...current,
+      executionDate: executionDate || null,
+      updatedAt: new Date().toISOString(),
+      updatedBy: userRole || 'dashboard'
+    });
+  };
+
   const saveTechnicalLog = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -692,18 +812,82 @@ export default function App() {
   if (!userRole) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
-        <form onSubmit={(e) => { e.preventDefault(); if (pinInput===ACCESS_PIN) setUserRole('engineer'); else if (pinInput===SALES_PIN) setUserRole('sales'); else alert('PIN ผิด'); setPinInput(""); }} className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl text-center space-y-6">
+        <div className="bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] w-full max-w-3xl shadow-2xl text-center space-y-6">
           <Building2 size={48} className="mx-auto text-indigo-600" />
           <h2 className="text-xl font-black italic uppercase text-slate-800">System Login</h2>
-          <div className="space-y-2">
-            <input type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-4 bg-slate-100 rounded-2xl text-center text-4xl font-bold border-2 outline-none" placeholder="PIN" />
-            <div className="flex justify-between px-2 text-[8px] font-black uppercase text-slate-400">
-                <span>Engineer: 222222</span>
-                <span>Sales: 111111</span>
+          {!loginMode ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button
+                type="button"
+                onClick={() => setLoginMode('sales')}
+                className="min-h-[170px] rounded-3xl border-2 bg-gradient-to-br from-blue-500 to-blue-700 text-white border-blue-300/60 px-4 py-6 font-black uppercase tracking-wide text-lg transition hover:brightness-110"
+              >
+                SALES MODE
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginMode('engineer')}
+                className="min-h-[170px] rounded-3xl border-2 bg-gradient-to-br from-red-500 to-rose-700 text-white border-red-300/60 px-4 py-6 font-black uppercase tracking-wide text-lg transition hover:brightness-110"
+              >
+                ENGINEER MODE
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginMode('management')}
+                className="min-h-[170px] rounded-3xl border-2 bg-gradient-to-br from-slate-900 to-amber-700 text-amber-100 border-amber-400/60 px-4 py-6 font-black uppercase tracking-wide text-lg transition hover:brightness-110"
+              >
+                MANAGEMENT MODE
+              </button>
             </div>
-          </div>
-          <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase">Enter System</button>
-        </form>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const expectedPin = MODE_CONFIG[loginMode].pin;
+                if (pinInput === expectedPin) {
+                  setUserRole(loginMode);
+                  setViewMode(MODE_CONFIG[loginMode].defaultView);
+                } else {
+                  alert('PIN ผิด');
+                }
+                setPinInput("");
+              }}
+              className="max-w-md mx-auto space-y-5"
+            >
+              <div className={`rounded-2xl p-4 bg-gradient-to-r ${MODE_CONFIG[loginMode].entryClass}`}>
+                <p className="text-xs font-black tracking-[0.2em] uppercase">Authentication</p>
+                <p className="text-xl font-black mt-1">{MODE_CONFIG[loginMode].label}</p>
+              </div>
+              <input
+                type="password"
+                value={pinInput}
+                onChange={e => setPinInput(e.target.value)}
+                className="w-full p-4 bg-slate-100 rounded-2xl text-center text-3xl sm:text-4xl font-bold border-2 outline-none"
+                placeholder={`PIN (${MODE_CONFIG[loginMode].shortLabel})`}
+              />
+              <div className="flex justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode(null);
+                    setPinInput("");
+                  }}
+                  className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-2xl font-black uppercase text-xs"
+                >
+                  Back
+                </button>
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-3 rounded-2xl font-black uppercase text-xs">
+                  Enter System
+                </button>
+              </div>
+              <div className="flex justify-between px-2 text-[8px] font-black uppercase text-slate-400">
+                <span>Sales: 111111</span>
+                <span>Engineer: 222222</span>
+                <span>Management: 333333</span>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     );
   }
@@ -715,21 +899,21 @@ export default function App() {
       <nav className="bg-white border-b p-4 sticky top-0 z-40 flex flex-wrap justify-between items-center px-6 shadow-sm gap-4">
         <div className="font-black text-indigo-600 flex items-center gap-2 text-xl italic font-sans">
             <Building2 size={24}/> APARTCLOUD 
-            <span className={`text-[10px] px-2 py-1 rounded-lg uppercase tracking-tighter ${userRole==='engineer'?'bg-amber-100 text-amber-600':'bg-purple-100 text-purple-600'}`}>
-                {userRole==='engineer'?'ENGINEER MODE':'SALES MODE'}
+            <span className={`text-[10px] px-2 py-1 rounded-lg uppercase tracking-tighter ${MODE_CONFIG[userRole].pillClass}`}>
+                {MODE_CONFIG[userRole].label}
             </span>
         </div>
         <div className="flex bg-slate-100 p-1 rounded-2xl gap-1">
-           <button onClick={()=>setViewMode('grid')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='grid'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>ผังห้อง</button>
-           <button onClick={()=>setViewMode('summary')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='summary'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Summary</button>
-           <button 
-  onClick={() => setViewMode('partnerReport')} 
-  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'partnerReport' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'text-slate-400 hover:bg-slate-200'}`}
->
-  <Monitor size={14} className="inline mr-1 mb-0.5"/> Partner Report
-</button>
+           {userRole === 'sales' && (
+             <>
+               <button onClick={()=>setViewMode('grid')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='grid'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>ผังห้อง</button>
+               <button onClick={()=>setViewMode('summary')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='summary'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Summary</button>
+             </>
+           )}
            {userRole === 'engineer' && (
              <>
+               <button onClick={()=>setViewMode('grid')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='grid'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>ผังห้อง</button>
+               <button onClick={()=>setViewMode('summary')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='summary'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Summary</button>
                <button onClick={()=>setViewMode('repairLog')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='repairLog'?'bg-amber-600 text-white shadow-sm':'text-slate-400'}`}>บันทึกซ่อม</button>
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
@@ -737,16 +921,38 @@ export default function App() {
                <button onClick={()=>setViewMode('facility')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='facility'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>Facility</button>
              </>
            )}
-           <button onClick={()=>setUserRole(null)} className="p-2 text-slate-300 hover:text-rose-500"><Unlock size={18}/></button>
+           {userRole === 'management' && (
+             <>
+               <button onClick={()=>setViewMode('management')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='management'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Management</button>
+               <button 
+                 onClick={() => setViewMode('partnerReport')} 
+                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'partnerReport' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'text-slate-400 hover:bg-slate-200'}`}
+               >
+                 <Monitor size={14} className="inline mr-1 mb-0.5"/> Partner Report
+               </button>
+             </>
+           )}
+           <button
+             onClick={() => {
+               setUserRole(null);
+               setLoginMode(null);
+               setPinInput("");
+             }}
+             className="p-2 text-slate-300 hover:text-rose-500"
+           >
+             <Unlock size={18}/>
+           </button>
         </div>
       </nav>
 
       <main className="p-4 max-w-7xl mx-auto space-y-6">
+        {userRole !== 'management' && (
         <div className="flex overflow-x-auto gap-2 no-scrollbar pb-2">
           {PROPERTIES.map(p => (
             <button key={p.id} onClick={() => setActivePropertyId(p.id)} className={`px-6 py-3 rounded-2xl border-2 font-black whitespace-nowrap transition-all ${activePropertyId === p.id ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-400 border-slate-100'}`}>{p.name}</button>
           ))}
         </div>
+        )}
 
         {viewMode === 'summary' ? (
             <div className="space-y-6 animate-in fade-in font-sans">
@@ -1094,6 +1300,18 @@ export default function App() {
                 </div>
               )}
             </div>
+            ) : viewMode === 'management' ? (
+          <ManagementDashboard
+            roomStates={roomStates}
+            maintenanceLogs={maintenanceLogs}
+            properties={PROPERTIES}
+            onUpdateRoomTask={handleDashboardRoomTaskUpdate}
+            onPostponeRoomTask={handleDashboardRoomTaskPostpone}
+            onUpdateMaintenanceTask={handleDashboardMaintenanceTaskUpdate}
+            onPostponeMaintenanceTask={handleDashboardMaintenanceTaskPostpone}
+            onSetRoomExecutionDate={handleDashboardRoomExecutionDate}
+            onSetMaintenanceExecutionDate={handleDashboardMaintenanceExecutionDate}
+          />
             ) : viewMode === 'partnerReport' ? (
           /* --- 📊 [NEW] MEGA SUMMARY FOR PARTNERS --- */
           <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500 font-sans pb-10">
