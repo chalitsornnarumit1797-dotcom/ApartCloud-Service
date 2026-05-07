@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction, deleteDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
 import Inventory from './pages/Inventory';
 import Facility from './pages/Facility';
 import ManagementDashboard from './pages/ManagementDashboard';
+import ExpenseManagement from './pages/ExpenseManagement';
 import { auth, db } from './firebase';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
@@ -34,8 +35,8 @@ const MODE_CONFIG = {
     label: 'MANAGEMENT MODE',
     shortLabel: 'MANAGEMENT',
     pin: MANAGEMENT_PIN,
-    defaultView: 'management',
-    allowedViews: ['management', 'partnerReport'],
+    defaultView: 'dashboard',
+    allowedViews: ['dashboard', 'summary', 'inventory', 'expenses'],
     entryClass: 'from-slate-900 to-amber-700 text-amber-100 border-amber-400/60',
     pillClass: 'bg-amber-100 text-amber-700'
   }
@@ -334,9 +335,15 @@ export default function App() {
     access: 'allow',
     actualCost: '',
     customerCharge: '',
-    newEquipmentPrice: ''
+    newEquipmentPrice: '',
+    receiptUrl: ''
   });
   const [inventoryTransferAssetId, setInventoryTransferAssetId] = useState('');
+  const [dashboardFilter, setDashboardFilter] = useState('all');
+  const [dashboardSearch, setDashboardSearch] = useState('');
+  const [expenses, setExpenses] = useState([]);
+  const [budgets, setBudgets] = useState({});
+  const [inventoryList, setInventoryList] = useState([]);
 
   useEffect(() => {
     if (!userRole || !MODE_CONFIG[userRole]) return;
@@ -375,8 +382,21 @@ export default function App() {
         });
         setAssets(data);
       });
-    });
-  }, []);
+      onSnapshot(collection(db, 'apartments', appId, 'expenses'), (snap) => {
+        const rows = [];
+        snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+        setExpenses(rows);
+      });
+      onSnapshot(doc(db, 'apartments', appId, 'settings', 'budgets'), (snap) => {
+         if (snap.exists()) setBudgets(snap.data());
+       });
+       onSnapshot(collection(db, 'apartments', appId, 'inventory'), (snap) => {
+         const rows = [];
+         snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+         setInventoryList(rows);
+       });
+     });
+   }, []);
 
   useEffect(() => {
     if (selectedRoom && showLogbook) {
@@ -573,7 +593,8 @@ export default function App() {
       access: 'allow',
       actualCost: '',
       customerCharge: '',
-      newEquipmentPrice: ''
+      newEquipmentPrice: '',
+      receiptUrl: ''
     });
     setRepairLogModal(category);
   };
@@ -597,6 +618,7 @@ export default function App() {
       actualCost: actual,
       customerCharge: charge,
       newEquipmentPrice: newPrice,
+      receiptUrl: repairLogForm.receiptUrl.trim(),
       createdAt: new Date().toISOString(),
       createdBy: userRole === 'sales' ? 'sales' : 'engineer'
     });
@@ -809,6 +831,77 @@ export default function App() {
     alert("บันทึกสเปคเรียบร้อย!");
   };
 
+  const handleSaveExpense = async (form) => {
+    await addDoc(collection(db, 'apartments', appId, 'expenses'), {
+      ...form,
+      createdAt: new Date().toISOString(),
+      createdBy: userRole
+    });
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (window.confirm('ยืนยันการลบรายการ?')) {
+      await deleteDoc(doc(db, 'apartments', appId, 'expenses', id));
+    }
+  };
+
+  const handleSaveBudget = async (categoryId, amount) => {
+    await setDoc(doc(db, 'apartments', appId, 'settings', 'budgets'), {
+      ...budgets,
+      [categoryId]: Number(amount)
+    });
+  };
+
+  const handleSaveInventory = async (item) => {
+    await addDoc(collection(db, 'apartments', appId, 'inventory'), {
+      ...item,
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  const handleUpdateInventoryStock = async (id, qty) => {
+    const item = inventoryList.find(i => i.id === id);
+    if (!item) return;
+    await setDoc(doc(db, 'apartments', appId, 'inventory', id), {
+      ...item,
+      stock: item.stock + qty,
+      lastRestocked: new Date().toISOString()
+    });
+  };
+
+  const handleDeductInventoryStock = async (id, qty, roomNo, note) => {
+    const item = inventoryList.find(i => i.id === id);
+    if (!item || item.stock < qty) return alert('จำนวนในคลังไม่พอ');
+    
+    // 1. Update Inventory and add to history
+    const usageEntry = {
+      date: new Date().toISOString(),
+      roomNo,
+      quantity: qty,
+      note: note || ''
+    };
+
+    await setDoc(doc(db, 'apartments', appId, 'inventory', id), {
+      ...item,
+      stock: item.stock - qty,
+      lastIssued: new Date().toISOString(),
+      usageHistory: [usageEntry, ...(item.usageHistory || [])].slice(0, 50) // Keep last 50 entries
+    });
+
+    // 2. Sync to Maintenance Logs
+    await addDoc(collection(db, 'apartments', appId, 'maintenance_logs'), {
+      propertyId: activePropertyId,
+      category: 'inventory_issue',
+      date: new Date().toISOString().split('T')[0],
+      roomOrBuilding: roomNo,
+      details: `เบิก ${item.name} จำนวน ${qty} ${item.unit}. หมายเหตุ: ${note || '-'}`,
+      actualCost: 0,
+      customerCharge: 0,
+      createdAt: new Date().toISOString(),
+      createdBy: 'management'
+    });
+  };
+
   if (!userRole) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -923,13 +1016,9 @@ export default function App() {
            )}
            {userRole === 'management' && (
              <>
-               <button onClick={()=>setViewMode('management')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='management'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Management</button>
-               <button 
-                 onClick={() => setViewMode('partnerReport')} 
-                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'partnerReport' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'text-slate-400 hover:bg-slate-200'}`}
-               >
-                 <Monitor size={14} className="inline mr-1 mb-0.5"/> Partner Report
-               </button>
+               <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='dashboard'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Dashboard</button>
+               <button onClick={()=>setViewMode('inventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='inventory'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Inventory</button>
+               <button onClick={()=>setViewMode('expenses')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='expenses'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Finance</button>
              </>
            )}
            <button
@@ -954,7 +1043,11 @@ export default function App() {
         </div>
         )}
 
-        {viewMode === 'summary' ? (
+        {viewMode === 'expenses' ? (
+          <ExpenseManagement />
+        ) : viewMode === 'inventory' ? (
+          <Inventory />
+        ) : viewMode === 'summary' ? (
             <div className="space-y-6 animate-in fade-in font-sans">
               
               {/* --- 🛠️ ส่วนของช่าง (ENGINEER) --- */}
@@ -1300,152 +1393,25 @@ export default function App() {
                 </div>
               )}
             </div>
-            ) : viewMode === 'management' ? (
-          <ManagementDashboard
-            roomStates={roomStates}
-            maintenanceLogs={maintenanceLogs}
-            properties={PROPERTIES}
-            onUpdateRoomTask={handleDashboardRoomTaskUpdate}
-            onPostponeRoomTask={handleDashboardRoomTaskPostpone}
-            onUpdateMaintenanceTask={handleDashboardMaintenanceTaskUpdate}
-            onPostponeMaintenanceTask={handleDashboardMaintenanceTaskPostpone}
-            onSetRoomExecutionDate={handleDashboardRoomExecutionDate}
-            onSetMaintenanceExecutionDate={handleDashboardMaintenanceExecutionDate}
-          />
-            ) : viewMode === 'partnerReport' ? (
-          /* --- 📊 [NEW] MEGA SUMMARY FOR PARTNERS --- */
-          <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500 font-sans pb-10">
-            <div className="text-center space-y-2 py-6">
-              <h2 className="text-5xl font-black italic text-slate-900 uppercase tracking-tighter">Portfolio Executive Report</h2>
-              <p className="text-slate-400 font-bold text-xs uppercase tracking-widest bg-slate-100 inline-block px-4 py-1 rounded-full border">
-                Update: {new Date().toLocaleDateString('th-TH')} | {new Date().toLocaleTimeString('th-TH')}
-              </p>
-            </div>
-
-            {/* 💎 กล่องสรุปภาพรวมทั้งพอร์ต (Grand Total) */}
-<div className="bg-slate-900 p-10 rounded-[4rem] shadow-2xl text-white mb-10 border-b-[12px] border-indigo-600">
-  <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-50 mb-4 text-center">Portfolio Grand Total (ทุกโครงการ)</p>
-  <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-     <div className="text-center">
-        <p className="text-[9px] font-bold opacity-40 uppercase">ห้องว่างทั้งหมด</p>
-        <p className="text-4xl font-black text-emerald-400">
-          {Object.values(roomStates).filter(v => v.status === 'ready').length}
-        </p>
-     </div>
-     <div className="text-center border-l border-white/10">
-        <p className="text-[9px] font-bold opacity-40 uppercase">นัดดู/จองรวม</p>
-        <p className="text-4xl font-black text-pink-400">
-          {Object.values(roomStates).filter(v => v.status === 'appointment' || v.status === 'booked').length}
-        </p>
-     </div>
-     <div className="text-center border-l border-white/10">
-        <p className="text-[9px] font-bold opacity-40 uppercase">แจ้งย้ายรวม</p>
-        <p className="text-4xl font-black text-rose-400">
-          {Object.values(roomStates).filter(v => v.status === 'checkingOut').length}
-        </p>
-     </div>
-     <div className="text-center border-l border-white/10">
-        <p className="text-[9px] font-bold opacity-40 uppercase">อยู่จริงทั้งหมด</p>
-        <p className="text-4xl font-black text-indigo-400">
-          {Object.values(roomStates).filter(v => v.status === 'rented').length}
-        </p>
-     </div>
-  </div>
-</div>
-
-            {userRole === 'sales' && (
-              <div className="bg-gradient-to-br from-cyan-800 to-slate-900 p-10 rounded-[3rem] shadow-2xl text-white mb-10 border-b-[10px] border-cyan-500">
-                <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-60 mb-2 flex items-center gap-2"><Package size={18}/> สถานะสต็อกตู้เย็นเช่า (Inventory Check)</p>
-                <p className="text-[11px] font-bold opacity-80 mb-6">เช็คทุกโครงการได้ทันที — ตู้ว่างคือที่พร้อมรับจองเช่า</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {PROPERTIES.map((prop) => {
-                    const s = fridgeStockByProperty[prop.id] || { available: 0, rented: 0, maintenance: 0 };
-                    return (
-                      <div key={prop.id} className="bg-white/10 rounded-[2rem] p-6 border border-white/10">
-                        <p className="text-sm font-black italic">{prop.name}</p>
-                        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                          <div>
-                            <p className="text-[8px] font-bold opacity-60 uppercase">ว่าง</p>
-                            <p className={`text-2xl font-black ${s.available === 0 ? 'text-rose-400' : 'text-emerald-300'}`}>{s.available}</p>
-                          </div>
-                          <div>
-                            <p className="text-[8px] font-bold opacity-60 uppercase">ถูกเช่า</p>
-                            <p className="text-2xl font-black text-cyan-200">{s.rented}</p>
-                          </div>
-                          <div>
-                            <p className="text-[8px] font-bold opacity-60 uppercase">ซ่อม</p>
-                            <p className="text-2xl font-black text-amber-300">{s.maintenance}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-8">
-              {PROPERTIES.map(prop => {
-                const rooms = Object.values(roomStates).filter(v => v.propertyId === prop.id);
-                const ready = rooms.filter(v => v.status === 'ready').length;
-                const appt = rooms.filter(v => v.status === 'appointment').length;
-                const booked = rooms.filter(v => v.status === 'booked').length;
-                const notice = rooms.filter(v => v.status === 'checkingOut' || v.status === 'keyReturn').length;
-                const repair = rooms.filter(v => ['maintenance', 'cleaningPre', 'cleaningPost', 'finalQC'].includes(v.status)).length;
-
-                return (
-                  <div key={prop.id} className="bg-white p-10 rounded-[4rem] shadow-2xl border-2 border-slate-50 relative overflow-hidden group hover:border-indigo-100 transition-all">
-                    <div className="flex justify-between items-end mb-8">
-                       <div>
-                         <h3 className="text-3xl font-black text-slate-800 italic leading-none">{prop.name}</h3>
-                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2 ml-1">Overall Status Summary</p>
-                       </div>
-                       <div className="text-right">
-                         <p className="text-[10px] font-black text-slate-300 uppercase">Total Rooms</p>
-                         <p className="text-2xl font-black text-slate-400">{prop.floors.reduce((acc, f) => acc + f.rooms.length, 0)}</p>
-                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                      {/* กล่องสีต่างๆ */}
-                      <div className="bg-emerald-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-emerald-700">
-                        <Tag size={20} className="mx-auto mb-2 opacity-40"/>
-                        <p className="text-[9px] font-black uppercase opacity-80">พร้อมขาย</p>
-                        <p className="text-3xl font-black">{ready}</p>
-                      </div>
-                      <div className="bg-pink-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-pink-700">
-                        <Camera size={20} className="mx-auto mb-2 opacity-40"/>
-                        <p className="text-[9px] font-black uppercase opacity-80">นัดดูห้อง</p>
-                        <p className="text-3xl font-black">{appt}</p>
-                      </div>
-                      <div className="bg-purple-600 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-purple-800">
-                        <ShoppingBag size={20} className="mx-auto mb-2 opacity-40"/>
-                        <p className="text-[9px] font-black uppercase opacity-80">รอย้ายเข้า</p>
-                        <p className="text-3xl font-black">{booked}</p>
-                      </div>
-                      <div className="bg-rose-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-rose-700">
-                        <Calendar size={20} className="mx-auto mb-2 opacity-40"/>
-                        <p className="text-[9px] font-black uppercase opacity-80">แจ้งย้าย</p>
-                        <p className="text-3xl font-black">{notice}</p>
-                      </div>
-                      <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white text-center shadow-lg border-b-[6px] border-amber-700">
-                        <Wrench size={20} className="mx-auto mb-2 opacity-40"/>
-                        <p className="text-[9px] font-black uppercase opacity-80">ปรับปรุง</p>
-                        <p className="text-3xl font-black">{repair}</p>
-                      </div>
-                    </div>
-                    {/* ลายน้ำจางๆ หลังตึก */}
-                    <Building2 size={120} className="absolute -right-10 -top-10 opacity-[0.03] -rotate-12 pointer-events-none"/>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : viewMode === 'inventory' ? (
-          <Inventory />
-        ) : viewMode === 'facility' ? (
-          <Facility />
-        ) : viewMode === 'repairLog' ? (
+            ) : viewMode === 'dashboard' ? (
+              <ManagementDashboard
+                roomStates={roomStates}
+                maintenanceLogs={maintenanceLogs}
+                properties={PROPERTIES}
+                onNavigate={(view, filter) => {
+                  if (filter) setDashboardFilter(filter);
+                  setViewMode(view);
+                }}
+                onSearch={(q) => {
+                  setDashboardSearch(q);
+                  setViewMode('grid');
+                }}
+              />
+            ) : viewMode === 'inventory' ? (
+              <Inventory />
+            ) : viewMode === 'facility' ? (
+              <Facility />
+            ) : viewMode === 'repairLog' ? (
            <div className="space-y-8 animate-in fade-in font-sans max-w-6xl mx-auto pb-10">
               <div className="bg-gradient-to-br from-amber-600 to-orange-700 p-10 rounded-[3rem] text-white shadow-2xl">
                  <h2 className="text-2xl md:text-3xl font-black italic uppercase flex items-center gap-3"><ClipboardCheck size={32}/> บันทึกการซ่อม · {activeProperty.name}</h2>
@@ -1496,6 +1462,7 @@ export default function App() {
                                    <th className="p-4 text-right">ทุนจริง</th>
                                    <th className="p-4 text-right">หักลูกค้า</th>
                                    <th className="p-4 text-right">ราคาเครื่องใหม่ (เทียบ)</th>
+                                   <th className="p-4">ใบเสร็จ</th>
                                    <th className="p-4">ซ่อมสะสม vs ซื้อใหม่</th>
                                 </tr>
                              </thead>
@@ -1525,6 +1492,20 @@ export default function App() {
                                          <td className="p-4 text-right font-black text-slate-800">{(Number(log.actualCost) || 0).toLocaleString()}</td>
                                          <td className="p-4 text-right font-black text-indigo-600">{(Number(log.customerCharge) || 0).toLocaleString()}</td>
                                          <td className="p-4 text-right font-black text-amber-600">{bench ? bench.toLocaleString() : '—'}</td>
+                                         <td className="p-4">
+                                            {log.receiptUrl ? (
+                                              <a 
+                                                href={log.receiptUrl} 
+                                                target="_blank" 
+                                                rel="noreferrer" 
+                                                className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg hover:bg-indigo-600 hover:text-white transition-all font-black text-[9px] uppercase"
+                                              >
+                                                <Camera size={12}/> View
+                                              </a>
+                                            ) : (
+                                              <span className="text-[9px] font-bold text-slate-300 uppercase">No Receipt</span>
+                                            )}
+                                         </td>
                                          <td className="p-4">
                                             <p className={worthClass}>{worthMsg}</p>
                                             <p className="text-[9px] text-slate-400 mt-1">ทุนสะสมถึงรายการนี้: {cumulative.toLocaleString()} ฿</p>
@@ -1607,6 +1588,58 @@ export default function App() {
         ) : (
            /* --- 🏢 ผังห้อง (Grid View) --- */
            <div className="space-y-6 animate-in fade-in font-sans">
+              {(dashboardSearch || dashboardFilter !== 'all') && (
+                <div className="bg-indigo-600 p-6 rounded-[2.5rem] text-white shadow-lg flex justify-between items-center">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Active Filter</p>
+                    <p className="text-xl font-black italic">
+                      {dashboardSearch ? `Searching: "${dashboardSearch}"` : `Showing: ${dashboardFilter}`}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => { setDashboardSearch(''); setDashboardFilter('all'); }}
+                    className="bg-white/20 hover:bg-white/30 p-2 rounded-xl transition-all"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              )}
+
+              {dashboardSearch && (
+                <div className="bg-white p-8 rounded-[3rem] border-2 shadow-sm space-y-6">
+                  <h4 className="font-black text-xs text-slate-400 uppercase flex items-center gap-2">
+                    <Banknote size={18}/> Finance Results for "{dashboardSearch}"
+                  </h4>
+                  <div className="space-y-3">
+                    {maintenanceLogs
+                      .filter(log => 
+                        log.roomOrBuilding?.toLowerCase().includes(dashboardSearch.toLowerCase()) ||
+                        log.details?.toLowerCase().includes(dashboardSearch.toLowerCase()) ||
+                        log.category?.toLowerCase().includes(dashboardSearch.toLowerCase())
+                      )
+                      .slice(0, 5)
+                      .map(log => (
+                        <div key={log.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl">
+                          <div>
+                            <p className="font-black text-slate-800">{log.roomOrBuilding}</p>
+                            <p className="text-[10px] text-slate-500">{log.details}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-black text-emerald-600">{Number(log.customerCharge || 0).toLocaleString()} ฿</p>
+                            <p className="text-[9px] text-slate-400 uppercase">{log.category}</p>
+                          </div>
+                        </div>
+                      ))}
+                    {maintenanceLogs.filter(log => 
+                        log.roomOrBuilding?.toLowerCase().includes(dashboardSearch.toLowerCase()) ||
+                        log.details?.toLowerCase().includes(dashboardSearch.toLowerCase())
+                      ).length === 0 && (
+                        <p className="text-xs text-slate-400 italic">No finance logs found.</p>
+                      )}
+                  </div>
+                </div>
+              )}
+
               {userRole === 'engineer' && (
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans font-sans font-sans">
                     <div className="bg-amber-500 p-6 rounded-[2.5rem] text-white shadow-lg space-y-2">
@@ -1678,7 +1711,30 @@ export default function App() {
                 <div key={floor.level} className="space-y-4 font-sans">
                    <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2 tracking-widest font-bold font-sans">ชั้น {floor.level}</h3>
                    <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                      {floor.rooms.map(roomNo => {
+                      {floor.rooms
+                        .filter(roomNo => {
+                          const docId = `${activePropertyId}_${roomNo}`;
+                          const info = roomStates[docId] || {};
+                          
+                          // 1. Apply Search
+                          if (dashboardSearch) {
+                            const q = dashboardSearch.toLowerCase();
+                            const matchesRoom = roomNo.toLowerCase().includes(q);
+                            const matchesTenant = info.tenantName?.toLowerCase().includes(q);
+                            const matchesPhone = info.tenantPhone?.toLowerCase().includes(q);
+                            if (!matchesRoom && !matchesTenant && !matchesPhone) return false;
+                          }
+
+                          // 2. Apply Dashboard Filter
+                          if (dashboardFilter !== 'all') {
+                            if (dashboardFilter === 'ready' && info.status !== 'ready') return false;
+                            if (dashboardFilter === 'pending' && !['appointment', 'booked'].includes(info.status)) return false;
+                            if (dashboardFilter === 'rented' && info.status !== 'rented') return false;
+                          }
+
+                          return true;
+                        })
+                        .map(roomNo => {
                         const info = roomStates[`${activePropertyId}_${roomNo}`] || { status: 'rented' };
                         const stepConfig = STEPS[info.status] || STEPS.ready;
                         const isNotMyTurn = userRole !== stepConfig.owner;
@@ -2247,6 +2303,17 @@ if (cur === 'inspection') {
                        <input type="number" min="0" value={repairLogForm.newEquipmentPrice} onChange={(e) => setRepairLogForm({ ...repairLogForm, newEquipmentPrice: e.target.value })} className="w-full p-3 bg-amber-50 rounded-xl font-black text-sm outline-none border-2 border-amber-100" placeholder="เทียบความคุ้มค่า" />
                     </label>
                  </div>
+                 <label className="block space-y-1">
+                    <span className="text-[9px] font-black text-indigo-600 uppercase flex items-center gap-2">
+                       <Camera size={14}/> ลิงก์รูปภาพใบเสร็จ (Receipt Image URL)
+                    </span>
+                    <input 
+                      value={repairLogForm.receiptUrl} 
+                      onChange={(e) => setRepairLogForm({ ...repairLogForm, receiptUrl: e.target.value })} 
+                      className="w-full p-3 bg-indigo-50/50 rounded-xl font-medium text-xs outline-none border-2 border-indigo-100 focus:border-indigo-400 text-indigo-700" 
+                      placeholder="https://firebasestorage.googleapis.com/..." 
+                    />
+                 </label>
               </div>
 
               <div className="flex gap-3 pt-2">
