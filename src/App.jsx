@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction, deleteDoc, getDocs } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
-import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft, Trash2, PlusCircle, Loader2 } from 'lucide-react';
+import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft, Trash2, PlusCircle, Loader2, Edit3 } from 'lucide-react';
 import Facility from './pages/Facility';
 import ManagementDashboard from './pages/ManagementDashboard';
 import ExpenseManagement from './pages/ExpenseManagement';
@@ -352,6 +352,7 @@ export default function App() {
   const [logHistory, setLogHistory] = useState([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
   const [assets, setAssets] = useState({});
+  const [refrigerators, setRefrigerators] = useState([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
   const [repairLogModal, setRepairLogModal] = useState(null); // null | 'air' | 'wm'
   const [repairLogForm, setRepairLogForm] = useState({
@@ -404,10 +405,16 @@ export default function App() {
       });
       onSnapshot(collection(db, GLOBAL_REFRIGERATORS_COLLECTION), (snap) => {
         const data = {};
+        const fridgeArray = [];
         snap.forEach((d) => {
-          data[d.id] = d.data();
+          const fridgeData = d.data();
+          data[d.id] = fridgeData;
+          if (fridgeData.type === FRIDGE_ASSET_TYPE) {
+            fridgeArray.push({ id: d.id, ...fridgeData });
+          }
         });
         setAssets(data);
+        setRefrigerators(fridgeArray);
         setLoadingAssets(false);
       }, (err) => {
         console.error("Fridge listener error:", err);
@@ -564,17 +571,22 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
     }
   }
   
-  // Check central collection for any fridge assigned to this room
-  const roomDocId = `${propertyId}_${roomNo}`;
-  
-  // Check multiple ways a fridge might be assigned to this room
+  // Check central collection for any fridge assigned to this room using new field structure
   const assignedFridge = Object.values(assetsData).find(a => {
     if (a.type !== FRIDGE_ASSET_TYPE) return false;
     
-    const matchesRoomKey = a.assignedRoomKey === roomDocId;
-    const matchesCurrentRoom = a.currentRoom === roomNo && (a.currentBuilding === propertyId || a.propertyId === propertyId);
+    // Primary check: currentBuilding and currentRoom match exactly
+    const matchesCurrentLocation = a.currentBuilding === propertyId && a.currentRoom === roomNo;
     
-    return (matchesRoomKey || matchesCurrentRoom) && (a.status === 'In Use' || a.status === 'rented');
+    // Secondary check: buildingName and roomNumber match (new fields)
+    const matchesNewFields = a.buildingName && a.roomNumber && 
+      PROPERTIES.find(p => p.id === propertyId)?.name === a.buildingName && 
+      a.roomNumber === roomNo;
+    
+    // Tertiary check: assignedRoomKey matches (for backward compatibility)
+    const matchesRoomKey = a.assignedRoomKey === `${propertyId}_${roomNo}`;
+    
+    return (matchesCurrentLocation || matchesNewFields || matchesRoomKey) && a.status === 'In Use';
   });
   
   if (assignedFridge) {
@@ -628,20 +640,123 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
     const size = (window.prompt('Size (เช่น 6.4 Q)') ?? '').trim();
     const label = window.prompt('Note / Label (ไม่บังคับ)') ?? '';
     
+    // Building Name dropdown with actual building names
+    const buildingOptions = (PROPERTIES || []).map((p, index) => `${index + 1}. ${p.name}`).join('\n');
+    const buildingInput = window.prompt(`Building Name (เลือกจากรายการ):\n${buildingOptions}\n\nพิมพ์เลขตัวเลข เช่น 1 สำหรับ G48 หรือปล่อยว่างสำหรับ Central Stock`)?.trim();
+    
+    let buildingName = null;
+    let roomNumber = null;
+    let status = 'available';
+    let currentBuilding = null;
+    let currentRoom = null;
+    let assignedRoomKey = null;
+    
+    if (buildingInput) {
+      const selectedIndex = parseInt(buildingInput) - 1;
+      const property = PROPERTIES[selectedIndex];
+      
+      if (property) {
+        buildingName = property.name;
+        currentBuilding = property.id;
+        roomNumber = window.prompt(`Room Number (เช่น 606) สำหรับ ${property.name}:`)?.trim();
+        
+        if (roomNumber) {
+          currentRoom = roomNumber;
+          assignedRoomKey = `${property.id}_${roomNumber}`;
+          status = 'In Use';
+        }
+      }
+    }
+    
     await addDoc(collection(db, GLOBAL_REFRIGERATORS_COLLECTION), {
       type: FRIDGE_ASSET_TYPE,
       assetId: assetId,
       brand: brand || '-',
       size: size || '-',
-      status: 'available',
+      status: status,
       label: label.trim() || 'Refrigerator',
-      assignedRoomKey: null,
-      currentBuilding: null,
-      currentRoom: null,
+      buildingName: buildingName,
+      roomNumber: roomNumber,
+      assignedRoomKey: assignedRoomKey,
+      currentBuilding: currentBuilding,
+      currentRoom: currentRoom,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
-    alert('Added to Master Stock successfully!');
+    alert(`Added to Master Stock successfully! Status: ${status === 'In Use' ? 'In Use (Assigned to room)' : 'Available'}`);
+  };
+
+  const editFridgeAsset = async (assetId) => {
+    if (userRole !== 'engineer' && userRole !== 'management') return;
+    if (!assetId) return;
+    
+    const cur = assets[assetId] || {};
+    
+    // Get current values
+    const currentBuildingName = cur.buildingName || '';
+    const currentRoomNumber = cur.roomNumber || '';
+    
+    // Building Name dropdown with specific buildings
+    const buildingOptions = [
+      "1. บ้านมั่งมีทวีสุข",
+      "2. บ้านมายทรี 48", 
+      "3. อพาร์ทเม้นท์มีทรัพย์",
+      "4. อพาร์ทเม้นท์มีทอง"
+    ].join('\n');
+    
+    const buildingInput = window.prompt(`Building Name (เลือกจากรายการ):\n${buildingOptions}\n\nพิมพ์เลขตัวเลข เช่น 1 สำหรับ G48\nปัจจุบัน: ${currentBuildingName || 'ไม่ได้ระบุ'}\nปล่อยว่างสำหรับ Central Stock`)?.trim();
+    
+    let buildingName = null;
+    let roomNumber = null;
+    let status = 'available';
+    let currentBuilding = null;
+    let currentRoom = null;
+    let assignedRoomKey = null;
+    
+    if (buildingInput) {
+      const buildingMap = {
+        '1': 'บ้านมั่งมีทวีสุข',
+        '2': 'บ้านมายทรี 48',
+        '3': 'อพาร์ทเม้นท์มีทรัพย์',
+        '4': 'อพาร์ทเม้นท์มีทอง'
+      };
+      
+      buildingName = buildingMap[buildingInput];
+      
+      if (buildingName) {
+        // Find the property ID for the building
+        const property = (PROPERTIES || []).find(p => p.name === buildingName);
+        currentBuilding = property ? property.id : null;
+        
+        const roomNumberInput = window.prompt(`Room Number (เช่น 606) สำหรับ ${buildingName}:\nปัจจุบัน: ${currentRoomNumber || 'ไม่ได้ระบุ'}`)?.trim();
+        
+        if (roomNumberInput) {
+          roomNumber = roomNumberInput;
+          currentRoom = roomNumber;
+          assignedRoomKey = currentBuilding ? `${currentBuilding}_${roomNumber}` : null;
+          status = 'In Use';
+        }
+        
+        // Add Notes field
+        const notesInput = window.prompt(`Notes (หมายเหตุผลเพิ่มเติม):\nปัจจุบัน: ${cur.notes || 'ไม่มี'}\nปล่อยว่างถ้าไม่มี`)?.trim();
+        const notes = notesInput || null;
+      }
+    }
+    
+    // Update the document
+    await setDoc(doc(db, GLOBAL_REFRIGERATORS_COLLECTION, assetId), {
+      ...cur,
+      buildingName: buildingName,
+      roomNumber: roomNumber,
+      currentBuilding: currentBuilding,
+      currentRoom: currentRoom,
+      assignedRoomKey: assignedRoomKey,
+      status: status,
+      notes: notes,
+      updatedAt: new Date().toISOString()
+    });
+    
+    alert(`Updated successfully! Status: ${status === 'In Use' ? 'In Use (Assigned to room)' : 'Available'}`);
   };
 
   const setFridgeAssetStatus = async (assetId, nextStatus) => {
@@ -767,6 +882,7 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
       }
     }
 
+    
     if (Object.keys(repairs).length > 0) updateData.repairData = repairs;
     if (Object.keys(qcChecks).length > 0) updateData.qcData = qcChecks;
 
@@ -1234,7 +1350,7 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
       <main className="p-4 max-w-7xl mx-auto space-y-6">
         {userRole !== 'management' && (
         <div className="flex overflow-x-auto gap-2 no-scrollbar pb-2">
-          {PROPERTIES.map(p => (
+          {(PROPERTIES || []).map(p => (
             <button key={p.id} onClick={() => setActivePropertyId(p.id)} className={`px-6 py-3 rounded-2xl border-2 font-black whitespace-nowrap transition-all ${activePropertyId === p.id ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-400 border-slate-100'}`}>{p.name}</button>
           ))}
         </div>
@@ -1485,15 +1601,17 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
                             <th className="px-8 py-5">Brand & Model</th>
                             <th className="px-8 py-5">Size (Q)</th>
                             <th className="px-8 py-5">Status</th>
-                            <th className="px-8 py-5">Location</th>
+                            <th className="px-8 py-5">Building</th>
+                            <th className="px-8 py-5">Room</th>
+                            <th className="px-8 py-5">Notes</th>
                             <th className="px-8 py-5 text-center">Manage</th>
                          </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                          {Object.entries(assets || {})
-                           .filter(([, a]) => a?.type === FRIDGE_ASSET_TYPE)
-                           .sort((a, b) => (a[1]?.assetId || '').localeCompare(b[1]?.assetId || ''))
-                           .map(([id, a]) => (
+                           ?.filter(([, a]) => a?.type === FRIDGE_ASSET_TYPE)
+                           ?.sort((a, b) => (a[1]?.assetId || '').localeCompare(b[1]?.assetId || ''))
+                           ?.map(([id, a]) => (
                             <tr key={id} className="hover:bg-slate-50/50 transition-colors group">
                                <td className="px-8 py-5">
                                   <p className="font-black text-slate-900 text-sm">{a.assetId || 'N/A'}</p>
@@ -1514,17 +1632,29 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
                                   </span>
                                </td>
                                <td className="px-8 py-5">
-                                  {a.currentBuilding ? (
-                                     <div className="space-y-0.5">
-                                        <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight">{PROPERTIES.find(p => p.id === a.currentBuilding)?.name || a.currentBuilding}</p>
-                                        <p className="text-[10px] font-bold text-blue-600 italic">ห้อง {a.currentRoom || '-'}</p>
-                                     </div>
-                                  ) : (
-                                     <span className="text-[10px] text-slate-300 font-bold italic">Central Stock</span>
-                                  )}
+                                  <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight">
+                                    {a.buildingName || (a.currentBuilding ? PROPERTIES.find(p => p.id === a.currentBuilding)?.name || a.currentBuilding : '-')}
+                                  </p>
+                               </td>
+                               <td className="px-8 py-5">
+                                  <p className="text-[10px] font-bold text-blue-600 italic">
+                                    {a.roomNumber || a.currentRoom || '-'}
+                                  </p>
+                               </td>
+                               <td className="px-8 py-5">
+                                  <p className="text-[9px] text-slate-600 italic">
+                                    {a.notes || '-'}
+                                  </p>
                                </td>
                                <td className="px-8 py-5 text-center">
                                   <div className="flex justify-center gap-2">
+                                     <button 
+                                       onClick={() => editFridgeAsset(id)}
+                                       className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                                       title="Edit Unit"
+                                     >
+                                        <Edit3 size={14}/>
+                                     </button>
                                      <button 
                                        onClick={() => setFridgeAssetStatus(id, 'available')}
                                        className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
@@ -2205,12 +2335,12 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
   </div>
 )}
 
-              {activeProperty?.floors.map(floor => (
+              {(activeProperty?.floors || []).map(floor => (
                 <div key={floor.level} className="space-y-4 font-sans">
                    <h3 className="font-black text-slate-400 text-[10px] uppercase pl-2 tracking-widest font-bold font-sans">ชั้น {floor.level}</h3>
                    <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                      {floor.rooms
-                        .filter(roomNo => {
+                      {(floor.rooms || [])
+                        ?.filter(roomNo => {
                           const docId = `${activePropertyId}_${roomNo}`;
                           const info = roomStates[docId] || {};
                           
@@ -2232,31 +2362,18 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
 
                           return true;
                         })
-                        .map(roomNo => {
+                        ?.map(roomNo => {
                         const info = roomStates[`${activePropertyId}_${roomNo}`] || { status: 'rented' };
                         const stepConfig = STEPS[info.status] || STEPS.ready;
                         const isNotMyTurn = userRole !== stepConfig.owner;
                         const isHidden = isNotMyTurn && !(userRole === 'engineer' && info.status === 'ready');
                         
-                        // Simple check for refrigerator assignment (optimized for performance)
-                        const hasFridge = userRole === 'sales' && (
-                          info.refrigeratorAssetId || 
-                          Object.values(assets).some(a => 
-                            a.type === FRIDGE_ASSET_TYPE && 
-                            (a.assignedRoomKey === `${activePropertyId}_${roomNo}` || 
-             (a.currentRoom === roomNo && (a.currentBuilding === activePropertyId || a.propertyId === activePropertyId))) &&
-                            (a.status === 'In Use' || a.status === 'rented')
-                          )
-                        );
-                        
+                                                
                         return (
                           <button key={roomNo} onClick={() => setSelectedRoom(roomNo)} className={`p-5 rounded-[2rem] font-black text-center shadow-sm border-b-4 border-black/10 transition-all font-sans font-sans ${STEPS[info.status]?.color || 'bg-slate-300'} text-white ${isHidden ? 'opacity-20 pointer-events-none' : 'active:scale-95'}`}>
                             <div className="text-lg leading-none">{roomNo}</div>
-                            <div className="text-[7px] uppercase opacity-70 mt-1 flex items-center justify-center gap-1">
+                            <div className="text-[7px] uppercase opacity-70 mt-1">
                               {STEPS[info.status]?.label}
-                              {hasFridge && (
-                                <span className="text-blue-200">❄️</span>
-                              )}
                             </div>
                           </button>
                         );
@@ -2282,31 +2399,7 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
                  </div>
               </div>
 
-              {/* Equipment Section - Professional UI */}
-              {(() => {
-                const roomInfo = roomStates[`${activePropertyId}_${selectedRoom}`] || {};
-                const fridgeInfo = getRefrigeratorInfoForRoom(activePropertyId, selectedRoom, roomInfo, assets, loadingAssets);
-                
-                if (fridgeInfo.status === 'Leased' || fridgeInfo.status === 'Legacy') {
-                  return (
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-4 rounded-2xl mb-6">
-                      <h4 className="text-xs font-black text-blue-700 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Package size={14} />
-                        Equipments
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        <span className="text-blue-600">❄️</span>
-                        <span className="font-bold text-sm text-blue-800">Refrigerator {fridgeInfo.status === 'Legacy' ? '(Legacy)' : ''}</span>
-                        <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
-                          {fridgeInfo.status === 'Legacy' ? 'Legacy Assignment' : (fridgeInfo.assetId || 'Unknown')}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-
+              
               {showLogbook ? (
                 /* 🔥 TECHNICAL LOGBOOK */
                 <div className="space-y-8 animate-in slide-in-from-bottom-2">
@@ -2522,6 +2615,9 @@ if (cur === 'rented') return (
           <UserCheck size={20} className="text-indigo-400"/>
           <p className="font-black text-xl">{info.tenantName || 'ไม่ระบุชื่อ'}</p>
         </div>
+        <div className="flex items-center gap-2 ml-8">
+          <span className="text-sm opacity-80">📞 {info.tenantPhone || '-'}</span>
+        </div>
       </div>
     </div>
 
@@ -2537,24 +2633,7 @@ if (cur === 'rented') return (
           <input name="tDate" defaultValue={info.tDate} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-sm text-emerald-600" />
         </div>
       </div>
-      {(() => {
-        const roomInfo = roomStates[`${activePropertyId}_${selectedRoom}`] || {};
-        const fridgeInfo = getRefrigeratorInfoForRoom(activePropertyId, selectedRoom, roomInfo, assets, loadingAssets);
-        
-        return (
-          <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 space-y-3">
-            <p className="text-xs font-black text-slate-800">Equipments</p>
-            <div className="text-sm text-slate-700">
-              {fridgeInfo.status === 'Leased' || fridgeInfo.status === 'Legacy' ? (
-                <span>❄️ Refrigerator {fridgeInfo.status === 'Legacy' ? '(Legacy)' : ''}</span>
-              ) : (
-                <span>None</span>
-              )}
-            </div>
           </div>
-        );
-      })()}
-    </div>
 
     <div className="grid grid-cols-1 gap-3">
       <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-xs">บันทึกการแก้ไขข้อมูล</button>
