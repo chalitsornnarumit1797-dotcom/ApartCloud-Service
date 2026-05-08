@@ -36,13 +36,13 @@ const ManagementDashboard = ({
 
   // 1. Integrated Stats (Available vs Occupied)
   const stats = useMemo(() => {
-    const rooms = Object.values(roomStates);
+    const rooms = Object.values(roomStates || {});
     
     return {
       totalUnits: rooms.length || 0,
-      available: rooms.filter(r => r.status === 'ready').length || 0,
-      occupied: rooms.filter(r => r.status === 'rented').length || 0,
-      pending: rooms.filter(r => ['appointment', 'booked'].includes(r.status)).length || 0
+      available: rooms.filter(r => r?.status === 'ready').length || 0,
+      occupied: rooms.filter(r => r?.status === 'rented').length || 0,
+      pending: rooms.filter(r => ['appointment', 'booked'].includes(r?.status)).length || 0
     };
   }, [roomStates]);
 
@@ -50,9 +50,9 @@ const ManagementDashboard = ({
   const priorityTasks = useMemo(() => {
     let tasks = [];
     
-    Object.entries(roomStates).forEach(([id, r]) => {
+    Object.entries(roomStates || {}).forEach(([id, r]) => {
       // Repair Jobs
-      if (r.status === 'maintenance') {
+      if (r?.status === 'maintenance') {
         tasks.push({
           id,
           roomNo: id.split('_')[1],
@@ -68,7 +68,7 @@ const ManagementDashboard = ({
         });
       }
       // Move-out Notifications
-      if (['checkingOut', 'keyReturn'].includes(r.status)) {
+      if (['checkingOut', 'keyReturn'].includes(r?.status)) {
         tasks.push({
           id,
           roomNo: id.split('_')[1],
@@ -93,12 +93,12 @@ const ManagementDashboard = ({
   // 3. Filtered Rooms for Drawer
   const filteredRooms = useMemo(() => {
     if (!drawerOpen) return [];
-    return Object.entries(roomStates)
+    return Object.entries(roomStates || {})
       .filter(([id, r]) => {
         if (drawerFilter === 'all') return true;
-        if (drawerFilter === 'ready') return r.status === 'ready';
-        if (drawerFilter === 'rented') return r.status === 'rented';
-        if (drawerFilter === 'pending') return ['appointment', 'booked'].includes(r.status);
+        if (drawerFilter === 'ready') return r?.status === 'ready';
+        if (drawerFilter === 'rented') return r?.status === 'rented';
+        if (drawerFilter === 'pending') return ['appointment', 'booked'].includes(r?.status);
         return true;
       })
       .map(([id, r]) => ({ id, roomNo: id.split('_')[1], ...r }));
@@ -245,7 +245,7 @@ const ManagementDashboard = ({
               <h3 className="text-lg font-black text-white uppercase tracking-widest">Quick Access</h3>
               <div className="grid grid-cols-2 gap-4">
                 <button 
-                  onClick={() => onNavigate('inventory')}
+                  onClick={() => onNavigate('managementInventory')}
                   className="bg-white/5 border border-white/5 p-4 rounded-[1.5rem] flex flex-col items-center gap-3 hover:bg-white/10 transition-all group"
                 >
                   <Layers className="text-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" size={20} />

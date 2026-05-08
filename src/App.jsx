@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, addDoc, query, where, orderBy, limit, runTransaction, deleteDoc, getDocs } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
-import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft } from 'lucide-react';
-import Inventory from './pages/Inventory';
+import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users, CheckCircle2, Key, Archive, LayoutGrid, UserCheck, Sparkles, Wind, Tablet as WashingMachine, Calendar, AlertTriangle, Settings, Camera, Phone, BookOpen, History, Save, Info, Bell, Hammer, Activity, ShieldCheck, Tag, ShoppingBag, BarChart3, ShoppingCart, ChevronRight, Monitor, Banknote, CreditCard, Package, ArrowRightLeft, Trash2, PlusCircle, Loader2 } from 'lucide-react';
 import Facility from './pages/Facility';
 import ManagementDashboard from './pages/ManagementDashboard';
 import ExpenseManagement from './pages/ExpenseManagement';
@@ -27,7 +26,7 @@ const MODE_CONFIG = {
     shortLabel: 'ENGINEER',
     pin: ACCESS_PIN,
     defaultView: 'grid',
-    allowedViews: ['grid', 'summary', 'repairLog', 'airPlanner', 'wmPlanner', 'inventory', 'facility'],
+    allowedViews: ['grid', 'summary', 'repairLog', 'airPlanner', 'wmPlanner', 'fridgeInventory', 'facility'],
     entryClass: 'from-red-500 to-rose-700 text-white border-red-300/60',
     pillClass: 'bg-rose-100 text-rose-700'
   },
@@ -36,7 +35,7 @@ const MODE_CONFIG = {
     shortLabel: 'MANAGEMENT',
     pin: MANAGEMENT_PIN,
     defaultView: 'dashboard',
-    allowedViews: ['dashboard', 'summary', 'inventory', 'expenses'],
+    allowedViews: ['dashboard', 'summary', 'expenses', 'managementInventory'],
     entryClass: 'from-slate-900 to-amber-700 text-amber-100 border-amber-400/60',
     pillClass: 'bg-amber-100 text-amber-700'
   }
@@ -63,6 +62,24 @@ const STEPS = {
   cleaningPost:  { label: 'ทำความสะอาดหลังซ่อม', color: 'bg-teal-400', next: 'finalQC', owner: 'sales' },
   finalQC:       { label: 'ตรวจ QC 6 หมวด', color: 'bg-indigo-600', next: 'ready', owner: 'engineer' }
 };
+
+/**
+ * @typedef {Object} RoomState
+ * @property {string} status
+ * @property {string} [tenantName]
+ * @property {string} [tenantPhone]
+ * @property {string} [refrigeratorAssetId]
+ * @property {string} [refrigeratorStatus]
+ * @property {string} [refrigeratorMonthlyFee]
+ * @property {string} [propertyId]
+ * @property {string} [propertyName]
+ */
+
+/**
+ * @typedef {Object} AppState
+ * @property {Object.<string, RoomState>} roomStates
+ * @property {Object} assets
+ */
 
 const CHECKLIST_OUT = {
   "1.หมวดกุญแจและระบบล็อค": [
@@ -148,6 +165,7 @@ const MAINTENANCE_ACCESS_LABEL = {
 
 const FRIDGE_ASSET_TYPE = 'refrigerator';
 const GLOBAL_REFRIGERATORS_COLLECTION = 'refrigerators';
+const LEADS_COLLECTION = 'leads';
 
 async function reserveSpecificFridge(dbConn, assetId, roomDocId, buildingId, roomNo) {
   if (!assetId) return false;
@@ -159,7 +177,7 @@ async function reserveSpecificFridge(dbConn, assetId, roomDocId, buildingId, roo
     const d = snap.data();
     if (d.type !== FRIDGE_ASSET_TYPE || d.status !== 'available') return;
     tx.update(ref, {
-      status: 'rented',
+      status: 'In Use',
       assignedRoomKey: roomDocId,
       propertyId: buildingId || null,
       currentBuilding: buildingId || null,
@@ -182,7 +200,7 @@ async function ensureFridgeRentedForRoom(dbConn, assetId, roomDocId, buildingId,
     const isSameRoom = data.assignedRoomKey === roomDocId;
     if (data.status !== 'available' && !isSameRoom) return;
     tx.update(ref, {
-      status: 'rented',
+      status: 'In Use',
       assignedRoomKey: roomDocId,
       propertyId: buildingId || null,
       currentBuilding: buildingId || null,
@@ -218,7 +236,8 @@ async function updateRoomWithFridgeTransaction(dbConn, {
   roomDocId,
   nextRoomData,
   nextFridgeAssetId,
-  clearFridgeFromRoom
+  clearFridgeFromRoom,
+  leadData = null
 }) {
   let reserveFailed = false;
   await runTransaction(dbConn, async (tx) => {
@@ -260,13 +279,19 @@ async function updateRoomWithFridgeTransaction(dbConn, {
         return;
       }
       tx.update(nextFridgeRef, {
-        status: 'rented',
+        status: 'In Use',
         assignedRoomKey: roomDocId,
         propertyId: nextRoomData.propertyId || null,
         currentBuilding: nextRoomData.propertyName || nextRoomData.propertyId || null,
         currentRoom: roomDocId.split('_')[1] || null,
         updatedAt: new Date().toISOString()
       });
+    }
+
+    if (leadData) {
+      const leadsColRef = collection(dbConn, 'apartments', appId, LEADS_COLLECTION);
+      const leadDocRef = doc(leadsColRef);
+      tx.set(leadDocRef, leadData);
     }
 
     tx.set(roomRef, nextRoomData);
@@ -327,6 +352,7 @@ export default function App() {
   const [logHistory, setLogHistory] = useState([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
   const [assets, setAssets] = useState({});
+  const [loadingAssets, setLoadingAssets] = useState(true);
   const [repairLogModal, setRepairLogModal] = useState(null); // null | 'air' | 'wm'
   const [repairLogForm, setRepairLogForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -338,12 +364,12 @@ export default function App() {
     newEquipmentPrice: '',
     receiptUrl: ''
   });
-  const [inventoryTransferAssetId, setInventoryTransferAssetId] = useState('');
   const [dashboardFilter, setDashboardFilter] = useState('all');
   const [dashboardSearch, setDashboardSearch] = useState('');
   const [expenses, setExpenses] = useState([]);
   const [budgets, setBudgets] = useState({});
   const [inventoryList, setInventoryList] = useState([]);
+  const [inventoryLogs, setInventoryLogs] = useState([]);
 
   useEffect(() => {
     if (!userRole || !MODE_CONFIG[userRole]) return;
@@ -355,7 +381,8 @@ export default function App() {
   useEffect(() => {
     signInAnonymously(auth).then(() => {
       onSnapshot(collection(db, 'apartments', appId, 'rooms'), (snap) => {
-        const data = {}; snap.forEach(d => { data[d.id] = d.data(); });
+        const data = {};
+        snap.forEach(d => { data[d.id] = d.data(); });
         setRoomStates(data);
       });
       onSnapshot(collection(db, 'apartments', appId, 'airPlans'), (snap) => {
@@ -381,19 +408,28 @@ export default function App() {
           data[d.id] = d.data();
         });
         setAssets(data);
+        setLoadingAssets(false);
+      }, (err) => {
+        console.error("Fridge listener error:", err);
+        setLoadingAssets(false);
       });
       onSnapshot(collection(db, 'apartments', appId, 'expenses'), (snap) => {
         const rows = [];
         snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
         setExpenses(rows);
       });
+      onSnapshot(collection(db, 'apartments', appId, 'inventory_master'), (snap) => {
+        const rows = [];
+        snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+        setInventoryList(rows);
+      });
+      onSnapshot(query(collection(db, 'apartments', appId, 'inventory_logs'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
+        const rows = [];
+        snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+        setInventoryLogs(rows);
+      });
       onSnapshot(doc(db, 'apartments', appId, 'settings', 'budgets'), (snap) => {
          if (snap.exists()) setBudgets(snap.data());
-       });
-       onSnapshot(collection(db, 'apartments', appId, 'inventory'), (snap) => {
-         const rows = [];
-         snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
-         setInventoryList(rows);
        });
      });
    }, []);
@@ -483,7 +519,7 @@ export default function App() {
       if (!building) return;
       if (!byProp[building]) byProp[building] = { available: 0, rented: 0, maintenance: 0 };
       if (a.status === 'available') byProp[building].available += 1;
-      else if (a.status === 'rented') byProp[building].rented += 1;
+      else if (a.status === 'rented' || a.status === 'In Use') byProp[building].rented += 1;
       else if (a.status === 'maintenance') byProp[building].maintenance += 1;
     });
     return byProp;
@@ -492,19 +528,80 @@ export default function App() {
   const activeFridgeStock = fridgeStockByProperty[activePropertyId] || { available: 0, rented: 0, maintenance: 0 };
 
   const getAvailableFridgeEntriesForProperty = (propertyId, selectedAssetId = '') =>
-    Object.entries(assets)
+    Object.entries(assets || {})
       .filter(([id, a]) => {
-        if (a.type !== FRIDGE_ASSET_TYPE) return false;
+        if (!a || a.type !== FRIDGE_ASSET_TYPE) return false;
         if (id === selectedAssetId) return true;
         const sameProperty = (a.propertyId || a.currentBuilding) === propertyId;
         if (!sameProperty) return false;
         return a.status === 'available';
       })
       .sort((a, b) => {
-        const codeA = String(a[1].assetId || a[0]);
-        const codeB = String(b[1].assetId || b[0]);
+        const codeA = String(a[1]?.assetId || a[0] || '');
+        const codeB = String(b[1]?.assetId || b[0] || '');
         return codeA.localeCompare(codeB);
       });
+
+const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, isLoading) => {
+  // Show loading state if data is still loading
+  if (isLoading) {
+    return {
+      status: 'Loading',
+      display: 'Checking...',
+      assetId: null
+    };
+  }
+  
+  // First check if room has refrigeratorAssetId from room data
+  if (roomInfo?.refrigeratorAssetId) {
+    const fridge = assetsData[roomInfo.refrigeratorAssetId];
+    if (fridge && fridge.type === FRIDGE_ASSET_TYPE) {
+      return {
+        status: 'Leased',
+        display: `❄️ เช่า: ${fridge.brand || fridge.assetId || 'Unknown'}`,
+        assetId: roomInfo.refrigeratorAssetId
+      };
+    }
+  }
+  
+  // Check central collection for any fridge assigned to this room
+  const roomDocId = `${propertyId}_${roomNo}`;
+  
+  // Check multiple ways a fridge might be assigned to this room
+  const assignedFridge = Object.values(assetsData).find(a => {
+    if (a.type !== FRIDGE_ASSET_TYPE) return false;
+    
+    const matchesRoomKey = a.assignedRoomKey === roomDocId;
+    const matchesCurrentRoom = a.currentRoom === roomNo && (a.currentBuilding === propertyId || a.propertyId === propertyId);
+    
+    return (matchesRoomKey || matchesCurrentRoom) && (a.status === 'In Use' || a.status === 'rented');
+  });
+  
+  if (assignedFridge) {
+    const assetId = Object.keys(assetsData).find(id => assetsData[id] === assignedFridge);
+    return {
+      status: 'Leased',
+      display: `❄️ เช่า: ${assignedFridge.brand || assignedFridge.assetId || 'Unknown'}`,
+      assetId: assetId
+    };
+  }
+  
+  // Check for legacy boolean field (if it exists)
+  if (roomInfo?.refrigerator === true) {
+    return {
+      status: 'Legacy',
+      display: '❄️ เช่า: Legacy',
+      assetId: null
+    };
+  }
+  
+  return {
+    status: 'None',
+    display: '',
+    assetId: null
+  };
+};
+
 
   const handleConfirmFridgeInRoom = async () => {
     const docId = `${activePropertyId}_${selectedRoom}`;
@@ -524,30 +621,34 @@ export default function App() {
   };
 
   const addFridgeAsset = async () => {
-    if (userRole !== 'engineer') return;
-    const assetId = (window.prompt('Asset ID (เช่น FR-001)') ?? '').trim();
-    const brand = (window.prompt('Brand (ยี่ห้อ)') ?? '').trim();
-    const size = (window.prompt('Size (ขนาด เช่น 7.4Q)') ?? '').trim();
-    const label = window.prompt('ชื่อแสดงผล (ไม่บังคับ)') ?? '';
+    if (userRole !== 'engineer' && userRole !== 'management') return;
+    const assetId = (window.prompt('Serial Number / Unique ID (เช่น SN-12345)') ?? '').trim();
+    if (!assetId) return;
+    const brand = (window.prompt('Brand / Model (เช่น Mitsubishi MR-1807)') ?? '').trim();
+    const size = (window.prompt('Size (เช่น 6.4 Q)') ?? '').trim();
+    const label = window.prompt('Note / Label (ไม่บังคับ)') ?? '';
+    
     await addDoc(collection(db, GLOBAL_REFRIGERATORS_COLLECTION), {
       type: FRIDGE_ASSET_TYPE,
-      assetId: assetId || undefined,
+      assetId: assetId,
       brand: brand || '-',
       size: size || '-',
       status: 'available',
-      label: label.trim() || 'ตู้เย็นเช่า',
+      label: label.trim() || 'Refrigerator',
       assignedRoomKey: null,
       currentBuilding: null,
       currentRoom: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
+    alert('Added to Master Stock successfully!');
   };
 
   const setFridgeAssetStatus = async (assetId, nextStatus) => {
-    if (userRole !== 'engineer' || !assetId) return;
+    if (userRole !== 'engineer' && userRole !== 'management') return;
+    if (!assetId) return;
     const cur = assets[assetId] || {};
-    if (cur.status === 'rented') {
+    if (cur.status === 'In Use' || cur.status === 'rented') {
       alert('ตู้นี้ถูกผูกกับห้องอยู่ — ยกเลิกเช่าที่ห้องก่อนจึงจะเปลี่ยนสถานะได้');
       return;
     }
@@ -557,32 +658,6 @@ export default function App() {
       currentRoom: nextStatus === 'available' ? null : cur.currentRoom || null,
       updatedAt: new Date().toISOString()
     });
-  };
-
-  const transferFridgeAsset = async () => {
-    if (userRole !== 'engineer') return;
-    const searchValue = (inventoryTransferAssetId || '').trim();
-    const matchedEntry = Object.entries(assets).find(([id, a]) => id === searchValue || a.assetId === searchValue);
-    const assetId = matchedEntry?.[0];
-    if (!assetId || !assets[assetId]) {
-      alert('ไม่พบ Asset ที่ต้องการโอน');
-      return;
-    }
-    const nextBuilding = (window.prompt('ย้ายไปอาคาร (property id เช่น mangmee/mytree/khunluang/meesap/meethong)') ?? '').trim();
-    const nextRoom = (window.prompt('ย้ายไปห้อง (ปล่อยว่างได้)') ?? '').trim();
-    if (!nextBuilding) {
-      alert('กรุณาระบุอาคารปลายทาง');
-      return;
-    }
-    const cur = assets[assetId];
-    await setDoc(doc(db, GLOBAL_REFRIGERATORS_COLLECTION, assetId), {
-      ...cur,
-      currentBuilding: nextBuilding,
-      currentRoom: nextRoom || null,
-      assignedRoomKey: nextRoom ? `${nextBuilding}_${nextRoom}` : null,
-      updatedAt: new Date().toISOString()
-    });
-    setInventoryTransferAssetId('');
   };
 
   const openRepairLogModal = (category) => {
@@ -625,7 +700,7 @@ export default function App() {
     setRepairLogModal(null);
   };
 
-  const handleUpdateRoom = async (nextStep) => {
+  const handleUpdateRoom = async (nextStep, leadStatus = null) => {
     const docId = `${activePropertyId}_${selectedRoom}`;
     const timestamp = new Date().toLocaleString('th-TH');
     const activePropertyName = PROPERTIES.find((p) => p.id === activePropertyId)?.name || activePropertyId;
@@ -665,6 +740,7 @@ export default function App() {
       if (formData.get('insurance')) updateData.insurance = formData.get('insurance');
       if (formData.get('checkoutDate')) updateData.checkoutDate = formData.get('checkoutDate');
       if (formData.get('qcNote')) updateData.qcNote = formData.get('qcNote');
+      if (formData.get('refrigeratorMonthlyFee')) updateData.refrigeratorMonthlyFee = formData.get('refrigeratorMonthlyFee');
     }
 
     if (userRole === 'sales' && form && (info.status === 'appointment' || info.status === 'booked' || info.status === 'rented') && nextStep !== 'ready') {
@@ -694,28 +770,48 @@ export default function App() {
     if (Object.keys(repairs).length > 0) updateData.repairData = repairs;
     if (Object.keys(qcChecks).length > 0) updateData.qcData = qcChecks;
 
+    let leadData = null;
     if (nextStep === 'ready') {
+      // Logic for automation: Lead Status + Auto-Reset Room
+      if (info.status === 'appointment' && leadStatus) {
+        leadData = {
+          roomDocId: docId,
+          roomNo: selectedRoom,
+          propertyId: activePropertyId,
+          propertyName: activePropertyName,
+          tenantName: info.tenantName || '-',
+          tenantPhone: info.tenantPhone || '-',
+          appointmentDate: info.tDate || info.appointmentDate || '-',
+          appointmentTime: info.appointmentTime || '-',
+          status: leadStatus === 'cancelled' ? 'Cancelled (ยกเลิก)' : 'Not Interested (ไม่สนใจ)',
+          createdAt: new Date().toISOString(),
+          createdBy: userRole
+        };
+      }
+
       const keysToDelete = [
         'repairData', 'qcData', 'qcNote', 'tenantName', 'tenantPhone',
         'deposit', 'insurance', 'checkoutDate', 'appointmentDate', 'appointmentTime',
-        'refrigeratorStatus', 'refrigeratorAssetId', 'refrigeratorReadyAt'
+        'refrigeratorStatus', 'refrigeratorAssetId', 'refrigeratorReadyAt', 'tDate', 'refrigeratorMonthlyFee'
       ];
       keysToDelete.forEach((key) => delete updateData[key]);
     }
 
-    const shouldHandleFridgeInTransaction = userRole === 'sales' || nextStep === 'ready' || nextStep === 'checkingOut';
+    const shouldHandleFridgeInTransaction = userRole === 'sales' || nextStep === 'ready';
     if (shouldHandleFridgeInTransaction) {
-      const clearFridgeFromRoom = nextStep === 'ready' || nextStep === 'checkingOut' || !updateData.refrigeratorAssetId;
-      if (nextStep === 'ready' || nextStep === 'checkingOut') {
+      const clearFridgeFromRoom = nextStep === 'ready' || !updateData.refrigeratorAssetId;
+      if (nextStep === 'ready') {
         updateData.refrigeratorStatus = 'none';
         delete updateData.refrigeratorAssetId;
         delete updateData.refrigeratorReadyAt;
+        delete updateData.refrigeratorMonthlyFee;
       }
       const synced = await updateRoomWithFridgeTransaction(db, {
         roomDocId: docId,
         nextRoomData: updateData,
         nextFridgeAssetId: updateData.refrigeratorAssetId || null,
-        clearFridgeFromRoom
+        clearFridgeFromRoom,
+        leadData
       });
       if (!synced) {
         return alert('ตู้เย็นที่เลือกไม่พร้อมใช้งานแล้ว กรุณาเลือกใหม่');
@@ -733,7 +829,92 @@ export default function App() {
     setQcChecks({});
   };
 
-  const handleUpdatePlan = async (type, id, field, value) => {
+  const handleUndoLead = async () => {
+      if (userRole !== 'sales') return;
+      const docId = `${activePropertyId}_${selectedRoom}`;
+     const leadsRef = collection(db, 'apartments', appId, LEADS_COLLECTION);
+    const q = query(
+      leadsRef,
+      where('roomDocId', '==', docId),
+      orderBy('createdAt', 'desc'),
+      limit(1)
+    );
+
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      alert('ไม่พบประวัติ Lead ที่จะกู้คืนสำหรับห้องนี้');
+      return;
+    }
+
+    const leadDoc = snap.docs[0];
+    const leadData = leadDoc.data();
+
+    if (leadData.status === 'Reverted') {
+      alert('Lead นี้ถูกกู้คืนไปแล้ว');
+      return;
+    }
+
+    const confirmUndo = window.confirm(`ยืนยันการกู้คืนนัดหมายของคุณ ${leadData.tenantName}?`);
+    if (!confirmUndo) return;
+
+    const timestamp = new Date().toLocaleString('th-TH');
+    const roomInfo = roomStates[docId] || {};
+    
+    const nextRoomData = {
+      ...roomInfo,
+      status: 'appointment',
+      tenantName: leadData.tenantName,
+      tenantPhone: leadData.tenantPhone,
+      tDate: leadData.appointmentDate,
+      appointmentTime: leadData.appointmentTime,
+      lastUpdateBy: `Undo (${userRole})`,
+      lastUpdateTime: timestamp
+    };
+
+    await runTransaction(db, async (tx) => {
+      tx.set(getRoomDocRef(db, docId), nextRoomData);
+      tx.update(leadDoc.ref, { status: 'Reverted', revertedAt: new Date().toISOString() });
+    });
+
+    setSelectedRoom(null);
+     alert('กู้คืนสถานะ "นัดดูห้อง" เรียบร้อยแล้ว');
+   };
+
+   const handleUndoStatus = async (targetStatus) => {
+     if (userRole !== 'sales') return;
+     const docId = `${activePropertyId}_${selectedRoom}`;
+    const timestamp = new Date().toLocaleString('th-TH');
+    const info = roomStates[docId] || {};
+
+    if (!window.confirm(`ยืนยันการกู้คืนสถานะกลับไปเป็น "${STEPS[targetStatus].label}"?`)) return;
+
+    let updateData = {
+      ...info,
+      status: targetStatus,
+      lastUpdateBy: `Undo (${userRole === 'sales' ? 'Sales' : 'Engineer'})`,
+      lastUpdateTime: timestamp
+    };
+
+    // If moving back to Available, clear booking data
+    if (targetStatus === 'ready') {
+      const keysToDelete = [
+        'tenantName', 'tenantPhone', 'roomPrice', 'insurance', 'tDate', 'appointmentTime',
+        'refrigeratorStatus', 'refrigeratorAssetId', 'refrigeratorReadyAt', 'refrigeratorMonthlyFee'
+      ];
+      keysToDelete.forEach(key => delete updateData[key]);
+    }
+
+    // If moving back to Occupied, clear checkout data
+    if (targetStatus === 'rented') {
+      delete updateData.checkoutDate;
+    }
+
+    await setDoc(getRoomDocRef(db, docId), updateData);
+    setSelectedRoom(null);
+    alert(`กู้คืนสถานะเป็น "${STEPS[targetStatus].label}" เรียบร้อย`);
+  };
+
+   const handleUpdatePlan = async (type, id, field, value) => {
     
     const col = type === 'air' ? 'airPlans' : 'wmPlans';
     const docId = `${activePropertyId}_${id}`;
@@ -852,54 +1033,70 @@ export default function App() {
     });
   };
 
-  const handleSaveInventory = async (item) => {
-    await addDoc(collection(db, 'apartments', appId, 'inventory'), {
+  const handleSaveInventoryItem = async (item) => {
+    if (userRole !== 'management') return;
+    await addDoc(collection(db, 'apartments', appId, 'inventory_master'), {
       ...item,
+      stock: Number(item.stock),
       createdAt: new Date().toISOString()
     });
   };
 
-  const handleUpdateInventoryStock = async (id, qty) => {
+  const handleWithdrawInventory = async (id, qty, person) => {
+    if (userRole !== 'management') return;
     const item = inventoryList.find(i => i.id === id);
     if (!item) return;
-    await setDoc(doc(db, 'apartments', appId, 'inventory', id), {
-      ...item,
-      stock: item.stock + qty,
-      lastRestocked: new Date().toISOString()
-    });
-  };
+    if (item.stock < qty) {
+      alert('Insufficient Stock! (จำนวนในคลังไม่พอ)');
+      return;
+    }
 
-  const handleDeductInventoryStock = async (id, qty, roomNo, note) => {
-    const item = inventoryList.find(i => i.id === id);
-    if (!item || item.stock < qty) return alert('จำนวนในคลังไม่พอ');
-    
-    // 1. Update Inventory and add to history
-    const usageEntry = {
-      date: new Date().toISOString(),
-      roomNo,
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      action: 'Withdraw (เบิก)',
+      itemName: item.name,
       quantity: qty,
-      note: note || ''
+      note: person || 'N/A'
     };
 
-    await setDoc(doc(db, 'apartments', appId, 'inventory', id), {
+    await setDoc(doc(db, 'apartments', appId, 'inventory_master', id), {
       ...item,
       stock: item.stock - qty,
-      lastIssued: new Date().toISOString(),
-      usageHistory: [usageEntry, ...(item.usageHistory || [])].slice(0, 50) // Keep last 50 entries
+      lastUpdated: timestamp
     });
 
-    // 2. Sync to Maintenance Logs
-    await addDoc(collection(db, 'apartments', appId, 'maintenance_logs'), {
-      propertyId: activePropertyId,
-      category: 'inventory_issue',
-      date: new Date().toISOString().split('T')[0],
-      roomOrBuilding: roomNo,
-      details: `เบิก ${item.name} จำนวน ${qty} ${item.unit}. หมายเหตุ: ${note || '-'}`,
-      actualCost: 0,
-      customerCharge: 0,
-      createdAt: new Date().toISOString(),
-      createdBy: 'management'
+    await addDoc(collection(db, 'apartments', appId, 'inventory_logs'), logEntry);
+  };
+
+  const handleRestockInventory = async (id, qty) => {
+    if (userRole !== 'management') return;
+    const item = inventoryList.find(i => i.id === id);
+    if (!item) return;
+
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      action: 'Restock (เติมของ)',
+      itemName: item.name,
+      quantity: qty,
+      note: 'Added to stock'
+    };
+
+    await setDoc(doc(db, 'apartments', appId, 'inventory_master', id), {
+      ...item,
+      stock: item.stock + qty,
+      lastUpdated: timestamp
     });
+
+    await addDoc(collection(db, 'apartments', appId, 'inventory_logs'), logEntry);
+  };
+
+  const handleDeleteInventoryItem = async (id) => {
+    if (userRole !== 'management') return;
+    if (window.confirm('ยืนยันการลบรายการนี้?')) {
+      await deleteDoc(doc(db, 'apartments', appId, 'inventory_master', id));
+    }
   };
 
   if (!userRole) {
@@ -1010,14 +1207,14 @@ export default function App() {
                <button onClick={()=>setViewMode('repairLog')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='repairLog'?'bg-amber-600 text-white shadow-sm':'text-slate-400'}`}>บันทึกซ่อม</button>
                <button onClick={()=>setViewMode('airPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airPlanner'?'bg-sky-500 text-white shadow-sm':'text-slate-400'}`}>แผนแอร์</button>
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
-               <button onClick={()=>setViewMode('inventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='inventory'?'bg-cyan-600 text-white shadow-sm':'text-slate-400'}`}>Inventory</button>
+               <button onClick={()=>setViewMode('fridgeInventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='fridgeInventory'?'bg-blue-600 text-white shadow-sm':'text-slate-400'}`}>ตู้เย็นเช่า</button>
                <button onClick={()=>setViewMode('facility')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='facility'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>Facility</button>
              </>
            )}
            {userRole === 'management' && (
              <>
                <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='dashboard'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Dashboard</button>
-               <button onClick={()=>setViewMode('inventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='inventory'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Inventory</button>
+               <button onClick={()=>setViewMode('managementInventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='managementInventory'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Inventory</button>
                <button onClick={()=>setViewMode('expenses')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='expenses'?'bg-white text-indigo-600 shadow-sm':'text-slate-400'}`}>Finance</button>
              </>
            )}
@@ -1045,8 +1242,332 @@ export default function App() {
 
         {viewMode === 'expenses' ? (
           <ExpenseManagement />
-        ) : viewMode === 'inventory' ? (
-          <Inventory />
+        ) : viewMode === 'managementInventory' ? (
+          <div className="space-y-8 animate-in fade-in font-sans pb-20">
+            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-10 rounded-[3rem] text-white shadow-2xl flex flex-wrap justify-between items-center gap-6">
+              <div>
+                <h2 className="text-2xl md:text-4xl font-black italic uppercase flex items-center gap-3"><Package size={40}/> Management Inventory</h2>
+                <p className="text-[10px] md:text-xs font-bold opacity-60 mt-2 uppercase tracking-widest">Dual-Stock Management • Transaction History</p>
+              </div>
+              <button 
+                onClick={() => {
+                  const name = window.prompt('ชื่อรายการ (Item Name)');
+                  const category = window.prompt('หมวดหมู่ (Category: Tools / Supplies)');
+                  const stock = window.prompt('จำนวนเริ่มต้น (Initial Stock)');
+                  const unit = window.prompt('หน่วย (Unit: ชิ้น/ขวด/อัน)');
+                  if (name && category && stock) {
+                    handleSaveInventoryItem({ name, category, stock, unit: unit || 'ชิ้น' });
+                  }
+                }}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-black uppercase text-xs shadow-xl transition-all active:scale-95 flex items-center gap-2"
+              >
+                <PlusCircle size={18}/> Add New Item
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+              {/* Table 1: Maintenance Stock */}
+              <div className="bg-white rounded-[3rem] border-2 border-slate-100 shadow-xl overflow-hidden">
+                <div className="bg-slate-50 p-8 border-b border-slate-100 flex justify-between items-center">
+                  <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-2"><Wrench size={20}/> Maintenance Stock</h3>
+                  <span className="bg-amber-100 text-amber-600 px-4 py-1 rounded-full text-[10px] font-black uppercase">Tools & Spares</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50/50">
+                        <th className="px-8 py-5">Item Name</th>
+                        <th className="px-8 py-5 text-center">Current Stock</th>
+                        <th className="px-8 py-5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {(inventoryList || []).filter(i => i?.category?.toLowerCase().includes('tool') || i?.category?.toLowerCase().includes('mainte')).map(item => (
+                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-5">
+                            <p className="font-black text-slate-800 text-sm">{item.name}</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase">{item.unit}</p>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            <span className={`text-lg font-black ${item.stock <= 5 ? 'text-rose-500' : 'text-slate-700'}`}>{item.stock}</span>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  const qty = window.prompt(`เบิก ${item.name} จำนวนเท่าไหร่?`);
+                                  const person = window.prompt(`ใครเป็นคนเบิก?`);
+                                  if (qty && !isNaN(qty)) handleWithdrawInventory(item.id, Number(qty), person);
+                                }}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md active:scale-95"
+                              >
+                                เบิก (Withdraw)
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  const qty = window.prompt(`เติม ${item.name} จำนวนเท่าไหร่?`);
+                                  if (qty && !isNaN(qty)) handleRestockInventory(item.id, Number(qty));
+                                }}
+                                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md active:scale-95"
+                              >
+                                เติม (Restock)
+                              </button>
+                              <button onClick={() => handleDeleteInventoryItem(item.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 size={16}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {(inventoryList || []).filter(i => i?.category?.toLowerCase().includes('tool') || i?.category?.toLowerCase().includes('mainte')).length === 0 && (
+                        <tr>
+                          <td colSpan="3" className="py-20 text-center opacity-30 italic text-slate-400 font-bold">No items in maintenance stock</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Table 2: Housekeeping Stock */}
+              <div className="bg-white rounded-[3rem] border-2 border-slate-100 shadow-xl overflow-hidden">
+                <div className="bg-slate-50 p-8 border-b border-slate-100 flex justify-between items-center">
+                  <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-2"><Sparkles size={20}/> Housekeeping Stock</h3>
+                  <span className="bg-indigo-100 text-indigo-600 px-4 py-1 rounded-full text-[10px] font-black uppercase">Supplies</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50/50">
+                        <th className="px-8 py-5">Item Name</th>
+                        <th className="px-8 py-5 text-center">Current Stock</th>
+                        <th className="px-8 py-5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {(inventoryList || []).filter(i => i?.category?.toLowerCase().includes('suppl') || i?.category?.toLowerCase().includes('house')).map(item => (
+                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-5">
+                            <p className="font-black text-slate-800 text-sm">{item.name}</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase">{item.unit}</p>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            <span className={`text-lg font-black ${item.stock <= 5 ? 'text-rose-500' : 'text-slate-700'}`}>{item.stock}</span>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  const qty = window.prompt(`เบิก ${item.name} จำนวนเท่าไหร่?`);
+                                  const person = window.prompt(`ใครเป็นคนเบิก?`);
+                                  if (qty && !isNaN(qty)) handleWithdrawInventory(item.id, Number(qty), person);
+                                }}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md active:scale-95"
+                              >
+                                เบิก (Withdraw)
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  const qty = window.prompt(`เติม ${item.name} จำนวนเท่าไหร่?`);
+                                  if (qty && !isNaN(qty)) handleRestockInventory(item.id, Number(qty));
+                                }}
+                                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md active:scale-95"
+                              >
+                                เติม (Restock)
+                              </button>
+                              <button onClick={() => handleDeleteInventoryItem(item.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 size={16}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {(inventoryList || []).filter(i => i?.category?.toLowerCase().includes('suppl') || i?.category?.toLowerCase().includes('house')).length === 0 && (
+                        <tr>
+                          <td colSpan="3" className="py-20 text-center opacity-30 italic text-slate-400 font-bold">No items in housekeeping stock</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction History Log */}
+            <div className="bg-slate-900 rounded-[3rem] border-2 border-white/5 shadow-2xl overflow-hidden">
+               <div className="bg-white/5 p-8 border-b border-white/5 flex items-center gap-4">
+                  <History className="text-indigo-400" size={24}/>
+                  <h3 className="text-xl font-black text-white uppercase tracking-widest italic">Inventory Logs (ประวัติการเบิก-เติม)</h3>
+               </div>
+               <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                     <thead>
+                        <tr className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] bg-white/5 border-b border-white/5">
+                           <th className="px-8 py-5">Date / Time</th>
+                           <th className="px-8 py-5">Action</th>
+                           <th className="px-8 py-5">Item Name</th>
+                           <th className="px-8 py-5 text-center">Qty</th>
+                           <th className="px-8 py-5">Note / Person</th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y divide-white/5">
+                        {(inventoryLogs || []).map((log) => (
+                           <tr key={log.id} className="text-slate-300 hover:bg-white/5 transition-colors">
+                              <td className="px-8 py-5 font-bold text-[10px]">{new Date(log.timestamp).toLocaleString('th-TH')}</td>
+                              <td className="px-8 py-5">
+                                 <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${log.action?.includes('Withdraw') ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                    {log.action}
+                                 </span>
+                              </td>
+                              <td className="px-8 py-5 font-black text-sm text-white">{log.itemName}</td>
+                              <td className="px-8 py-5 text-center font-black">{log.quantity}</td>
+                              <td className="px-8 py-5 text-xs text-slate-400">{log.note}</td>
+                           </tr>
+                        ))}
+                        {(inventoryLogs || []).length === 0 && (
+                           <tr>
+                              <td colSpan="5" className="py-20 text-center opacity-20 italic text-slate-400 font-bold">No transaction history found</td>
+                           </tr>
+                        )}
+                     </tbody>
+                  </table>
+               </div>
+            </div>
+          </div>
+        ) : viewMode === 'fridgeInventory' ? (
+          <div className="space-y-6 animate-in fade-in font-sans">
+             <div className="bg-gradient-to-br from-blue-600 to-indigo-800 p-10 rounded-[3rem] text-white shadow-2xl flex flex-wrap justify-between items-center gap-6">
+                <div>
+                   <h2 className="text-2xl md:text-3xl font-black italic uppercase flex items-center gap-3"><Package size={32}/> Refrigerator Stock (สต็อกตู้เย็น)</h2>
+                   <p className="text-[10px] font-bold opacity-80 mt-2">Central hub for all refrigerators across all properties • Real-time Sync</p>
+                </div>
+                <button 
+                  onClick={addFridgeAsset}
+                  className="bg-white text-indigo-600 px-8 py-4 rounded-2xl font-black uppercase text-xs shadow-xl hover:scale-105 transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <PlusCircle size={18}/> Add New Unit
+                </button>
+             </div>
+
+             {loadingAssets ? (
+                <div className="bg-white/50 backdrop-blur-md p-20 rounded-[3rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-4 text-slate-400">
+                   <Loader2 size={48} className="animate-spin text-blue-600" />
+                   <p className="text-lg font-black uppercase tracking-widest">Loading data from Workspace...</p>
+                </div>
+             ) : (
+             <>
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-sm flex items-center justify-between">
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Units</p>
+                      <p className="text-3xl font-black text-emerald-500">{Object.values(assets || {}).filter(a => a?.type === FRIDGE_ASSET_TYPE && a?.status === 'available').length}</p>
+                   </div>
+                   <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500"><CheckCircle2 size={24}/></div>
+                </div>
+                <div className="bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-sm flex items-center justify-between">
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Currently In Use</p>
+                      <p className="text-3xl font-black text-blue-500">{Object.values(assets || {}).filter(a => a?.type === FRIDGE_ASSET_TYPE && (a?.status === 'rented' || a?.status === 'In Use')).length}</p>
+                   </div>
+                   <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500"><ShoppingBag size={24}/></div>
+                </div>
+                <div className="bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-sm flex items-center justify-between">
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Repairing</p>
+                      <p className="text-3xl font-black text-amber-500">{Object.values(assets || {}).filter(a => a?.type === FRIDGE_ASSET_TYPE && a?.status === 'maintenance').length}</p>
+                   </div>
+                   <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500"><Wrench size={24}/></div>
+                </div>
+             </div>
+
+             <div className="bg-white rounded-[3rem] border-2 border-slate-100 shadow-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                   <table className="w-full text-left">
+                      <thead className="bg-slate-50 border-b border-slate-100">
+                         <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            <th className="px-8 py-5">Serial / Unique ID</th>
+                            <th className="px-8 py-5">Brand & Model</th>
+                            <th className="px-8 py-5">Size (Q)</th>
+                            <th className="px-8 py-5">Status</th>
+                            <th className="px-8 py-5">Location</th>
+                            <th className="px-8 py-5 text-center">Manage</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                         {Object.entries(assets || {})
+                           .filter(([, a]) => a?.type === FRIDGE_ASSET_TYPE)
+                           .sort((a, b) => (a[1]?.assetId || '').localeCompare(b[1]?.assetId || ''))
+                           .map(([id, a]) => (
+                            <tr key={id} className="hover:bg-slate-50/50 transition-colors group">
+                               <td className="px-8 py-5">
+                                  <p className="font-black text-slate-900 text-sm">{a.assetId || 'N/A'}</p>
+                                  <p className="text-[8px] text-slate-400 font-bold uppercase mt-0.5">ID: {id.slice(0, 8)}</p>
+                               </td>
+                               <td className="px-8 py-5">
+                                  <p className="font-bold text-slate-700">{a.brand || '-'}</p>
+                                  <p className="text-[10px] text-slate-400">{a.label || '-'}</p>
+                               </td>
+                               <td className="px-8 py-5 font-black text-slate-600">{a.size || '-'}</td>
+                               <td className="px-8 py-5">
+                                  <span className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tight ${
+                                    a.status === 'available' ? 'bg-emerald-100 text-emerald-600' :
+                                    (a.status === 'rented' || a.status === 'In Use') ? 'bg-blue-100 text-blue-600' :
+                                    'bg-amber-100 text-amber-600'
+                                  }`}>
+                                     {a.status === 'available' ? 'Available' : (a.status === 'rented' || a.status === 'In Use') ? 'In Use' : 'Repairing'}
+                                  </span>
+                               </td>
+                               <td className="px-8 py-5">
+                                  {a.currentBuilding ? (
+                                     <div className="space-y-0.5">
+                                        <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight">{PROPERTIES.find(p => p.id === a.currentBuilding)?.name || a.currentBuilding}</p>
+                                        <p className="text-[10px] font-bold text-blue-600 italic">ห้อง {a.currentRoom || '-'}</p>
+                                     </div>
+                                  ) : (
+                                     <span className="text-[10px] text-slate-300 font-bold italic">Central Stock</span>
+                                  )}
+                               </td>
+                               <td className="px-8 py-5 text-center">
+                                  <div className="flex justify-center gap-2">
+                                     <button 
+                                       onClick={() => setFridgeAssetStatus(id, 'available')}
+                                       className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                                       title="Set to Available"
+                                     >
+                                        <CheckCircle2 size={14}/>
+                                     </button>
+                                     <button 
+                                       onClick={() => setFridgeAssetStatus(id, 'maintenance')}
+                                       className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                                       title="Set to Repairing"
+                                     >
+                                        <Wrench size={14}/>
+                                     </button>
+                                     <button 
+                                       onClick={async () => {
+                                          if (a.assignedRoomKey) return alert('ตู้นี้ถูกผูกกับห้องอยู่ — ยกเลิกเช่าที่ห้องก่อนจึงจะลบได้');
+                                          if (window.confirm('Confirm delete this unit?')) {
+                                             await deleteDoc(doc(db, GLOBAL_REFRIGERATORS_COLLECTION, id));
+                                          }
+                                       }}
+                                       className="w-8 h-8 rounded-lg bg-rose-50 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                                       title="Delete Unit"
+                                     >
+                                        <Trash2 size={14}/>
+                                     </button>
+                                  </div>
+                               </td>
+                            </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                </div>
+                {Object.values(assets || {}).filter(a => a?.type === FRIDGE_ASSET_TYPE).length === 0 && (
+                   <div className="py-20 text-center space-y-4 opacity-30">
+                      <Package size={64} className="mx-auto text-slate-400" />
+                      <p className="text-slate-400 font-black uppercase tracking-widest text-sm">No refrigerator units found in Master Stock</p>
+                   </div>
+                )}
+             </div>
+             </>
+             )}
+          </div>
         ) : viewMode === 'summary' ? (
             <div className="space-y-6 animate-in fade-in font-sans">
               
@@ -1058,13 +1579,13 @@ export default function App() {
                     <div className="bg-amber-500 p-8 rounded-[3rem] text-white shadow-lg">
                       <h4 className="font-black text-xs uppercase mb-4 flex items-center gap-2"><Hammer size={18}/> ภารกิจซ่อมวันนี้</h4>
                       <div className="space-y-3">
-                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'maintenance').map(([k,v]) => (
+                        {Object.entries(roomStates || {}).filter(([k,v]) => v?.propertyId === activePropertyId && v?.status === 'maintenance').map(([k,v]) => (
                           <div key={k} className="bg-white/20 p-4 rounded-2xl flex justify-between items-center">
                             <span className="font-black text-lg">ห้อง {k.split('_')[1]}</span>
                             <span className="text-[10px] font-bold italic opacity-70">รอดำเนินการซ่อม</span>
                           </div>
                         ))}
-                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'maintenance').length === 0 && <p className="text-xs opacity-60 italic">ไม่มีงานซ่อมค้าง</p>}
+                        {Object.entries(roomStates || {}).filter(([k,v]) => v?.propertyId === activePropertyId && v?.status === 'maintenance').length === 0 && <p className="text-xs opacity-60 italic">ไม่มีงานซ่อมค้าง</p>}
                       </div>
                     </div>
 
@@ -1072,34 +1593,13 @@ export default function App() {
                     <div className="bg-indigo-600 p-8 rounded-[3rem] text-white shadow-lg">
                       <h4 className="font-black text-xs uppercase mb-4 flex items-center gap-2"><ShieldCheck size={18}/> คิวตรวจ QC 6 หมวด</h4>
                       <div className="space-y-3">
-                        {Object.entries(roomStates).filter(([k,v]) => v.propertyId === activePropertyId && v.status === 'finalQC').map(([k,v]) => (
+                        {Object.entries(roomStates || {}).filter(([k,v]) => v?.propertyId === activePropertyId && v?.status === 'finalQC').map(([k,v]) => (
                           <div key={k} className="bg-white/20 p-4 rounded-2xl flex justify-between items-center">
                             <span className="font-black text-lg">ห้อง {k.split('_')[1]}</span>
                             <span className="text-[10px] font-bold italic opacity-70">รอตรวจก่อนส่งมอบ</span>
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-800 p-8 rounded-[3rem] text-white shadow-lg border-b-4 border-cyan-600">
-                    <h4 className="font-black text-xs uppercase mb-3 flex items-center gap-2"><Package size={18}/> ตู้เย็นเช่า — {activeProperty.name}</h4>
-                    <p className="text-[10px] font-bold opacity-70 mb-4">ว่าง {activeFridgeStock.available} · ถูกเช่า {activeFridgeStock.rented} · ซ่อม {activeFridgeStock.maintenance}</p>
-                    <button type="button" onClick={addFridgeAsset} className="w-full sm:w-auto px-8 py-3 rounded-2xl bg-cyan-500 text-slate-900 font-black text-[10px] uppercase mb-4 active:scale-[0.98]">+ เพิ่มตู้ว่างเข้าสต็อก</button>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {Object.entries(assets).filter(([, a]) => (a.currentBuilding || a.propertyId) === activePropertyId && a.type === FRIDGE_ASSET_TYPE).map(([id, a]) => (
-                        <div key={id} className="flex flex-wrap items-center justify-between gap-2 bg-white/10 p-3 rounded-xl text-[10px]">
-                          <span className="font-black">{a.label || id.slice(0, 8)}</span>
-                          <span className="opacity-80">{a.status === 'available' ? 'ว่าง' : a.status === 'rented' ? 'ถูกเช่า' : 'ซ่อม'}</span>
-                          <div className="flex gap-1">
-                            <button type="button" onClick={() => setFridgeAssetStatus(id, 'available')} className="px-2 py-1 rounded-lg bg-emerald-600/80 font-black text-[8px] uppercase">ว่าง</button>
-                            <button type="button" onClick={() => setFridgeAssetStatus(id, 'maintenance')} className="px-2 py-1 rounded-lg bg-amber-600/80 font-black text-[8px] uppercase">ซ่อม</button>
-                          </div>
-                        </div>
-                      ))}
-                      {Object.entries(assets).filter(([, a]) => (a.currentBuilding || a.propertyId) === activePropertyId && a.type === FRIDGE_ASSET_TYPE).length === 0 && (
-                        <p className="text-[10px] opacity-50 italic">ยังไม่มีรายการ — กดเพิ่มตู้ว่าง</p>
-                      )}
                     </div>
                   </div>
 
@@ -1407,8 +1907,6 @@ export default function App() {
                   setViewMode('grid');
                 }}
               />
-            ) : viewMode === 'inventory' ? (
-              <Inventory />
             ) : viewMode === 'facility' ? (
               <Facility />
             ) : viewMode === 'repairLog' ? (
@@ -1739,10 +2237,27 @@ export default function App() {
                         const stepConfig = STEPS[info.status] || STEPS.ready;
                         const isNotMyTurn = userRole !== stepConfig.owner;
                         const isHidden = isNotMyTurn && !(userRole === 'engineer' && info.status === 'ready');
+                        
+                        // Simple check for refrigerator assignment (optimized for performance)
+                        const hasFridge = userRole === 'sales' && (
+                          info.refrigeratorAssetId || 
+                          Object.values(assets).some(a => 
+                            a.type === FRIDGE_ASSET_TYPE && 
+                            (a.assignedRoomKey === `${activePropertyId}_${roomNo}` || 
+             (a.currentRoom === roomNo && (a.currentBuilding === activePropertyId || a.propertyId === activePropertyId))) &&
+                            (a.status === 'In Use' || a.status === 'rented')
+                          )
+                        );
+                        
                         return (
                           <button key={roomNo} onClick={() => setSelectedRoom(roomNo)} className={`p-5 rounded-[2rem] font-black text-center shadow-sm border-b-4 border-black/10 transition-all font-sans font-sans ${STEPS[info.status]?.color || 'bg-slate-300'} text-white ${isHidden ? 'opacity-20 pointer-events-none' : 'active:scale-95'}`}>
                             <div className="text-lg leading-none">{roomNo}</div>
-                            <div className="text-[7px] uppercase opacity-70 mt-1">{STEPS[info.status]?.label}</div>
+                            <div className="text-[7px] uppercase opacity-70 mt-1 flex items-center justify-center gap-1">
+                              {STEPS[info.status]?.label}
+                              {hasFridge && (
+                                <span className="text-blue-200">❄️</span>
+                              )}
+                            </div>
                           </button>
                         );
                       })}
@@ -1757,7 +2272,7 @@ export default function App() {
       {selectedRoom && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-sans">
            <div className="bg-white rounded-[3rem] w-full max-w-xl max-h-[85vh] overflow-y-auto p-10 shadow-2xl relative">
-              <div className="flex justify-between items-center mb-10 font-sans font-sans font-sans">
+              <div className="flex justify-between items-center mb-6 font-sans font-sans font-sans">
                  <div className="font-sans font-sans font-sans"><h3 className="text-3xl font-black text-indigo-600">ห้อง {selectedRoom}</h3><p className="text-[10px] font-bold text-slate-400 uppercase mt-2 tracking-widest font-sans">{activeProperty.name}</p></div>
                  <div className="flex gap-2">
                     <button onClick={() => setShowLogbook(!showLogbook)} className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm font-sans ${showLogbook ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
@@ -1766,6 +2281,31 @@ export default function App() {
                     <button onClick={() => setSelectedRoom(null)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><X size={32}/></button>
                  </div>
               </div>
+
+              {/* Equipment Section - Professional UI */}
+              {(() => {
+                const roomInfo = roomStates[`${activePropertyId}_${selectedRoom}`] || {};
+                const fridgeInfo = getRefrigeratorInfoForRoom(activePropertyId, selectedRoom, roomInfo, assets, loadingAssets);
+                
+                if (fridgeInfo.status === 'Leased' || fridgeInfo.status === 'Legacy') {
+                  return (
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-4 rounded-2xl mb-6">
+                      <h4 className="text-xs font-black text-blue-700 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <Package size={14} />
+                        Equipments
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-600">❄️</span>
+                        <span className="font-bold text-sm text-blue-800">Refrigerator {fridgeInfo.status === 'Legacy' ? '(Legacy)' : ''}</span>
+                        <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
+                          {fridgeInfo.status === 'Legacy' ? 'Legacy Assignment' : (fridgeInfo.assetId || 'Unknown')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {showLogbook ? (
                 /* 🔥 TECHNICAL LOGBOOK */
@@ -1840,16 +2380,27 @@ if (cur === 'appointment') return (
         const selectedValue = info.refrigeratorAssetId || '';
         const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
         return (
-          <div className="bg-white p-4 rounded-2xl border-2 border-pink-100 space-y-2">
+          <div className="bg-white p-4 rounded-2xl border-2 border-pink-100 space-y-3">
             <p className="text-xs font-black text-slate-800">เช่าตู้เย็น (เลือกจากรายการตู้ว่าง)</p>
-            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-pink-200 rounded-xl font-bold text-sm outline-none">
-              <option value="">ไม่เช่าตู้เย็น</option>
-              {fridgeOptions.map(([id, a]) => (
-                <option key={id} value={id}>
-                  {a.assetId || id}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-3">
+              <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-pink-200 rounded-xl font-bold text-sm outline-none">
+                <option value="">ไม่เช่าตู้เย็น</option>
+                {fridgeOptions.map(([id, a]) => (
+                  <option key={id} value={id}>
+                    {a.assetId || id}
+                  </option>
+                ))}
+              </select>
+              <div className="relative">
+                <input 
+                  name="refrigeratorMonthlyFee" 
+                  defaultValue={info.refrigeratorMonthlyFee || "500"} 
+                  className="w-full p-3 bg-white border-2 border-pink-200 rounded-xl font-black text-sm text-pink-600 outline-none pr-8" 
+                  placeholder="ค่าเช่า/เดือน"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">฿</span>
+              </div>
+            </div>
             <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-pink-600">{fridgeOptions.length}</span> เครื่อง</p>
           </div>
         );
@@ -1860,12 +2411,21 @@ if (cur === 'appointment') return (
       </button>
     </div>
 
-    <div className="grid grid-cols-2 gap-4">
-      {/* ❌ ถ้าไม่สนใจ: กดแล้วข้อมูลจะถูกล้างและกลับไป 'Ready' */}
-      <button type="button" onClick={() => handleUpdateRoom('ready')} className="bg-slate-200 text-slate-500 py-8 rounded-[2rem] font-black text-lg uppercase shadow-md active:scale-95">ไม่สนใจ / ยกเลิก</button>
+    <div className="grid grid-cols-3 gap-3">
+      {/* ❌ ปุ่มยกเลิก (Cancelled) */}
+      <button type="button" onClick={() => handleUpdateRoom('ready', 'cancelled')} className="bg-slate-200 text-slate-500 py-6 rounded-2xl font-black text-xs uppercase shadow-md active:scale-95 flex flex-col items-center justify-center gap-1">
+        <X size={18}/> ยกเลิก (Cancelled)
+      </button>
+
+      {/* 🚫 ปุ่มไม่สนใจ (Not Interested) */}
+      <button type="button" onClick={() => handleUpdateRoom('ready', 'not_interested')} className="bg-slate-100 text-slate-400 py-6 rounded-2xl font-black text-xs uppercase shadow-md active:scale-95 flex flex-col items-center justify-center gap-1">
+        <Archive size={18}/> ไม่สนใจ
+      </button>
       
       {/* ✅ ถ้าเอา: กดแล้วจะพาไปหน้า 'Booked' เพื่อกรอกเงินประกันต่อ */}
-      <button type="button" onClick={() => handleUpdateRoom('booked')} className="bg-pink-500 text-white py-8 rounded-[2rem] font-black text-lg uppercase shadow-xl active:scale-95">ตกลงเช่า → ไปหน้าจอง</button>
+      <button type="button" onClick={() => handleUpdateRoom('booked')} className="bg-pink-500 text-white py-6 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 flex flex-col items-center justify-center gap-1">
+        <CheckCircle2 size={18}/> ตกลงเช่า → จอง
+      </button>
     </div>
   </div>
 );
@@ -1911,16 +2471,27 @@ if (cur === 'booked') return (
         const selectedValue = info.refrigeratorAssetId || '';
         const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
         return (
-          <div className="bg-white p-4 rounded-2xl border-2 border-purple-100 space-y-2">
+          <div className="bg-white p-4 rounded-2xl border-2 border-purple-100 space-y-3">
             <p className="text-xs font-black text-slate-800">เลือกตู้เย็นจากสต็อก</p>
-            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-purple-200 rounded-xl font-bold text-sm outline-none">
-              <option value="">ไม่เช่าตู้เย็น</option>
-              {fridgeOptions.map(([id, a]) => (
-                <option key={id} value={id}>
-                  {a.assetId || id}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-3">
+              <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-purple-200 rounded-xl font-bold text-sm outline-none">
+                <option value="">ไม่เช่าตู้เย็น</option>
+                {fridgeOptions.map(([id, a]) => (
+                  <option key={id} value={id}>
+                    {a.assetId || id}
+                  </option>
+                ))}
+              </select>
+              <div className="relative">
+                <input 
+                  name="refrigeratorMonthlyFee" 
+                  defaultValue={info.refrigeratorMonthlyFee || "500"} 
+                  className="w-full p-3 bg-white border-2 border-purple-200 rounded-xl font-black text-sm text-purple-600 outline-none pr-8" 
+                  placeholder="ค่าเช่า/เดือน"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">฿</span>
+              </div>
+            </div>
             <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-purple-600">{fridgeOptions.length}</span> เครื่อง</p>
           </div>
         );
@@ -1930,6 +2501,11 @@ if (cur === 'booked') return (
       <button type="button" onClick={() => handleUpdateRoom('booked')} className="w-full bg-white border-2 border-purple-300 text-purple-700 py-4 rounded-2xl font-black text-xs uppercase shadow-sm active:scale-[0.99]">บันทึกข้อมูลจอง (ยังไม่ทำสัญญา)</button>
       {info.refrigeratorStatus === 'requested' && (
         <button type="button" onClick={() => { handleConfirmFridgeInRoom(); }} className="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm uppercase shadow-lg border-b-4 border-emerald-700 active:scale-[0.99]">ยืนยันตู้เย็นพร้อมในห้องแล้ว</button>
+      )}
+      {userRole === 'sales' && (
+        <button type="button" onClick={() => handleUndoStatus('ready')} className="w-full py-3 rounded-xl border-2 border-dashed border-purple-200 text-purple-400 font-black text-[10px] uppercase hover:bg-purple-50 transition-all flex items-center justify-center gap-2">
+          <ArrowRightLeft size={14}/> Undo Booking (กลับไป "พร้อมขาย")
+        </button>
       )}
     </div>
     <button type="button" onClick={() => handleUpdateRoom('rented')} className="w-full bg-purple-600 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl border-b-[10px] border-purple-800 active:scale-95 transition-all">ยืนยันทำสัญญา → เช่าอยู่จริง</button>
@@ -1962,20 +2538,19 @@ if (cur === 'rented') return (
         </div>
       </div>
       {(() => {
-        const selectedValue = info.refrigeratorAssetId || '';
-        const fridgeOptions = getAvailableFridgeEntriesForProperty(activePropertyId, selectedValue);
+        const roomInfo = roomStates[`${activePropertyId}_${selectedRoom}`] || {};
+        const fridgeInfo = getRefrigeratorInfoForRoom(activePropertyId, selectedRoom, roomInfo, assets, loadingAssets);
+        
         return (
-          <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 space-y-2">
-            <p className="text-xs font-black text-slate-800">เลือกตู้เย็นจากสต็อก</p>
-            <select name="refrigeratorAssetId" defaultValue={selectedValue} className="w-full p-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-sm outline-none">
-              <option value="">ไม่เช่าตู้เย็น</option>
-              {fridgeOptions.map(([id, a]) => (
-                <option key={id} value={id}>
-                  {a.assetId || id}
-                </option>
-              ))}
-            </select>
-            <p className="text-[9px] font-bold text-slate-500">ตู้ว่างในตึกนี้: <span className="text-slate-700">{fridgeOptions.length}</span> เครื่อง</p>
+          <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 space-y-3">
+            <p className="text-xs font-black text-slate-800">Equipments</p>
+            <div className="text-sm text-slate-700">
+              {fridgeInfo.status === 'Leased' || fridgeInfo.status === 'Legacy' ? (
+                <span>❄️ Refrigerator {fridgeInfo.status === 'Legacy' ? '(Legacy)' : ''}</span>
+              ) : (
+                <span>None</span>
+              )}
+            </div>
           </div>
         );
       })()}
@@ -2013,6 +2588,12 @@ if (cur === 'rented') return (
                               <button type="button" onClick={() => handleUpdateRoom('keyReturn')} className="w-full bg-slate-900 text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase shadow-xl">
                                  ดำเนินการคืนกุญแจ
                               </button>
+
+                              {userRole === 'sales' && (
+                                <button type="button" onClick={() => handleUndoStatus('rented')} className="w-full py-3 rounded-xl border-2 border-dashed border-rose-200 text-rose-400 font-black text-[10px] uppercase hover:bg-rose-50 transition-all flex items-center justify-center gap-2">
+                                  <ArrowRightLeft size={14}/> Undo Notice (กลับไป "มีผู้เช่า")
+                                </button>
+                              )}
                            </div>
                         </div>
                       ); 
@@ -2244,6 +2825,17 @@ if (cur === 'inspection') {
                            >
                               ผ่าน QC: เปิดขายห้องทันที
                            </button>
+                        </div>
+                      );
+
+                      if (cur === 'ready') return (
+                        <div className="space-y-4">
+                           <button type="button" onClick={() => handleUpdateRoom(STEPS[cur].next)} className="w-full bg-slate-900 text-white py-12 rounded-[2.5rem] font-black text-2xl uppercase shadow-2xl font-sans">{STEPS[cur].label} → {STEPS[STEPS[cur].next]?.label}</button>
+                           {userRole === 'sales' && (
+                            <button type="button" onClick={handleUndoLead} className="w-full py-4 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 font-black text-[10px] uppercase hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+                               <ArrowRightLeft size={14}/> Undo Last Cancelled Lead (กู้คืนนัดหมายล่าสุด)
+                            </button>
+                           )}
                         </div>
                       );
 

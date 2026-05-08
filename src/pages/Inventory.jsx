@@ -43,10 +43,11 @@ const Inventory = () => {
         id: doc.id,
         ...doc.data()
       }));
-      setItems(data);
+      setItems(Array.isArray(data) ? data : []);
       setLoading(false);
     }, (error) => {
       console.error("Inventory Listener Error:", error);
+      setItems([]);
       setLoading(false);
     });
 
@@ -99,9 +100,11 @@ const Inventory = () => {
     }
   };
 
-  const filteredItems = items.filter(item => 
-    item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.category?.toLowerCase().includes(searchQuery.toLowerCase())
+  if (!items) return <div className="p-10 text-white font-black uppercase tracking-widest animate-pulse">Loading Inventory...</div>;
+
+  const filteredItems = (Array.isArray(items) ? items : []).filter(item => 
+    item?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item?.category?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -213,7 +216,7 @@ const Inventory = () => {
                       </div>
                     </td>
                   </tr>
-                ) : filteredItems.length > 0 ? (
+                ) : Array.isArray(filteredItems) && filteredItems.length > 0 ? (
                   filteredItems.map((item) => (
                     <tr key={item.id} className="group hover:bg-white/5 transition-colors">
                       <td className="py-5 px-8 font-black text-white uppercase text-sm tracking-tight">{item.name}</td>
