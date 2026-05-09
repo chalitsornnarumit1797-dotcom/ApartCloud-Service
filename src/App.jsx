@@ -5,6 +5,7 @@ import { Building2, X, Clock, Wrench, ClipboardCheck, Lock, Unlock, User, Users,
 import Facility from './pages/Facility';
 import ManagementDashboard from './pages/ManagementDashboard';
 import ExpenseManagement from './pages/ExpenseManagement';
+import AirCleaningLog from './pages/AirCleaningLog';
 import { auth, db } from './firebase';
 
 const ACCESS_PIN = "222222"; // สำหรับ Engineer Mode
@@ -26,7 +27,7 @@ const MODE_CONFIG = {
     shortLabel: 'ENGINEER',
     pin: ACCESS_PIN,
     defaultView: 'grid',
-    allowedViews: ['grid', 'summary', 'repairLog', 'airPlanner', 'wmPlanner', 'fridgeInventory', 'facility'],
+    allowedViews: ['grid', 'summary', 'repairLog', 'airPlanner', 'wmPlanner', 'fridgeInventory', 'facility', 'airCleaningLog'],
     entryClass: 'from-red-500 to-rose-700 text-white border-red-300/60',
     pillClass: 'bg-rose-100 text-rose-700'
   },
@@ -371,6 +372,7 @@ export default function App() {
   const [budgets, setBudgets] = useState({});
   const [inventoryList, setInventoryList] = useState([]);
   const [inventoryLogs, setInventoryLogs] = useState([]);
+  const [airCleaningHistory, setAirCleaningHistory] = useState([]);
 
   useEffect(() => {
     if (!userRole || !MODE_CONFIG[userRole]) return;
@@ -438,6 +440,11 @@ export default function App() {
       onSnapshot(doc(db, 'apartments', appId, 'settings', 'budgets'), (snap) => {
          if (snap.exists()) setBudgets(snap.data());
        });
+      onSnapshot(query(collection(db, 'apartments', appId, 'air_cleaning_history'), orderBy('date', 'desc'), limit(200)), (snap) => {
+        const rows = [];
+        snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+        setAirCleaningHistory(rows);
+      });
      });
    }, []);
 
@@ -1325,6 +1332,7 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
                <button onClick={()=>setViewMode('wmPlanner')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='wmPlanner'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>เครื่องซักผ้า</button>
                <button onClick={()=>setViewMode('fridgeInventory')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='fridgeInventory'?'bg-blue-600 text-white shadow-sm':'text-slate-400'}`}>ตู้เย็นเช่า</button>
                <button onClick={()=>setViewMode('facility')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='facility'?'bg-indigo-600 text-white shadow-sm':'text-slate-400'}`}>Facility</button>
+               <button onClick={()=>setViewMode('airCleaningLog')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${viewMode==='airCleaningLog'?'bg-teal-600 text-white shadow-sm':'text-slate-400'}`}>Air Cleaning Log</button>
              </>
            )}
            {userRole === 'management' && (
@@ -2039,6 +2047,8 @@ const getRefrigeratorInfoForRoom = (propertyId, roomNo, roomInfo, assetsData, is
               />
             ) : viewMode === 'facility' ? (
               <Facility />
+            ) : viewMode === 'airCleaningLog' ? (
+              <AirCleaningLog activePropertyId={activePropertyId} airCleaningHistory={airCleaningHistory} />
             ) : viewMode === 'repairLog' ? (
            <div className="space-y-8 animate-in fade-in font-sans max-w-6xl mx-auto pb-10">
               <div className="bg-gradient-to-br from-amber-600 to-orange-700 p-10 rounded-[3rem] text-white shadow-2xl">
